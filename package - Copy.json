@@ -1,0 +1,8 @@
+{
+  "name": "youtube-all-rounder",
+  "version": "1.0.0",
+  "description": "YouTube All-Rounder - Free YouTube Tools",
+  "dependencies": {
+    "ytdl-core": "^4.11.5"
+  }
+}

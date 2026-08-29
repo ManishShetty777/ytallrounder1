@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+
+    <!-- SEO Meta Tags -->
+    <title>YouTube All-Rounder - Free YouTube Tools | Download, Thumbnail, Audio, SEO</title>
+    <meta name="description" content="Free YouTube All-Rounder tools: Download HD thumbnails, extract audio MP3, download videos MP4, generate descriptions, hashtags & tags. 100% free, no signup required.">
+    <meta name="keywords" content="youtube downloader, youtube thumbnail downloader, youtube audio downloader, youtube video downloader, youtube mp3, youtube mp4, hashtag generator, description generator, youtube seo tools, youtube tags generator">
+    <meta name="author" content="YouTube All-Rounder">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://your-domain.vercel.app">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://your-domain.vercel.app">
+    <meta property="og:title" content="YouTube All-Rounder - Free YouTube Tools">
+    <meta property="og:description" content="Download thumbnails, audio, videos. Generate descriptions, hashtags & tags. All free tools in one place.">
+    <meta property="og:image" content="https://your-domain.vercel.app/og-image.png">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://your-domain.vercel.app">
+    <meta property="twitter:title" content="YouTube All-Rounder - Free YouTube Tools">
+    <meta property="twitter:description" content="Download thumbnails, audio, videos. Generate descriptions, hashtags & tags. All free tools in one place.">
+    <meta property="twitter:image" content="https://your-domain.vercel.app/og-image.png">
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "YouTube All-Rounder",
+        "url": "https://your-domain.vercel.app",
+        "description": "Free YouTube tools for downloading thumbnails, audio, videos, and generating descriptions, hashtags & tags.",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Web Browser",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+        }
+    }
+    </script>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <!-- Animate.css -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+
+    <!-- Main CSS -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- Preloader -->
+    <div id="preloader">
+        <div class="loader">
+            <div class="loader-inner">
+                <div class="loader-ring"></div>
+                <div class="loader-ring"></div>
+                <div class="loader-ring"></div>
+                <i class="fab fa-youtube loader-icon"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Header / Navigation -->
+    <header class="header" id="header">
+        <nav class="navbar">
+            <a href="#" class="logo">
+                <i class="fab fa-youtube"></i>
+                <span>YT All-Rounder</span>
+            </a>
+            <ul class="nav-links" id="navLinks">
+                <li><a href="#home" class="nav-link active">Home</a></li>
+                <li><a href="#tools" class="nav-link">Tools</a></li>
+                <li><a href="#generators" class="nav-link">Generators</a></li>
+                <li><a href="#seo" class="nav-link">SEO Tools</a></li>
+                <li><a href="#about" class="nav-link">About</a></li>
+            </ul>
+            <div class="hamburger" id="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero" id="home">
+        <div class="hero-particles" id="particles"></div>
+        <div class="hero-content">
+            <h1 class="hero-title animate__animated animate__fadeInUp">
+                <span class="gradient-text">YouTube All-Rounder</span>
+            </h1>
+            <p class="hero-subtitle animate__animated animate__fadeInUp animate__delay-1s animated-gradient-text">
+                Download thumbnails, audio, videos & generate SEO content. All tools in one place.
+            </p>
+            <div class="hero-search animate__animated animate__fadeInUp animate__delay-1s">
+                <div class="search-box">
+                    <i class="fab fa-youtube"></i>
+                    <input type="text" id="heroUrl" placeholder="Paste YouTube URL here..." autocomplete="off">
+                    <button class="btn btn-primary" onclick="detectURLType()">
+                        <i class="fas fa-search"></i> Detect
+                    </button>
+                </div>
+            </div>
+            <div class="hero-stats animate__animated animate__fadeInUp animate__delay-2s">
+            </div>
+        </div>
+        <div class="scroll-indicator">
+            <div class="mouse">
+                <div class="wheel"></div>
+            </div>
+            <span>Scroll Down</span>
+        </div>
+    </section>
+
+    <!-- Tools Section -->
+    <section class="section tools-section" id="tools">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">Download Tools</span>
+                <h2 class="section-title">YouTube Download Tools</h2>
+                <p class="section-subtitle">Download any YouTube content with high quality</p>
+            </div>
+
+            <div class="tools-grid">
+                <!-- Thumbnail Downloader -->
+                <div class="tool-card" data-aos="fade-up">
+                    <div class="tool-icon">
+                        <i class="fas fa-image"></i>
+                    </div>
+                    <h3 class="tool-title">Thumbnail Downloader</h3>
+                    <p class="tool-desc">Download YouTube thumbnails in HD, SD, and max resolution</p>
+                    <div class="tool-input-group">
+                        <input type="text" id="thumbUrl" placeholder="Paste YouTube video URL...">
+                        <select id="thumbQuality">
+                            <option value="maxresdefault">Max Resolution (1280x720)</option>
+                            <option value="sddefault">SD (640x480)</option>
+                            <option value="hqdefault">HQ (480x360)</option>
+                            <option value="mqdefault">MQ (320x180)</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary btn-block" onclick="downloadThumbnail()">
+                        <i class="fas fa-download"></i> Download Thumbnail
+                    </button>
+                    <div id="thumbResult" class="tool-result"></div>
+                </div>
+
+                <!-- Audio Downloader -->
+                <div class="tool-card" data-aos="fade-up" data-aos-delay="100">
+                    <div class="tool-icon audio-icon">
+                        <i class="fas fa-music"></i>
+                    </div>
+                    <h3 class="tool-title">Audio Downloader (MP3)</h3>
+                    <p class="tool-desc">Extract and download audio from YouTube videos as MP3</p>
+                    <div class="tool-input-group">
+                        <input type="text" id="audioUrl" placeholder="Paste YouTube video URL...">
+                        <select id="audioQuality">
+                            <option value="320">320kbps (Best)</option>
+                            <option value="256">256kbps</option>
+                            <option value="192" selected>192kbps</option>
+                            <option value="128">128kbps</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary btn-block" onclick="downloadAudio()">
+                        <i class="fas fa-download"></i> Download Audio
+                    </button>
+                    <div id="audioResult" class="tool-result"></div>
+                </div>
+
+                <!-- Video Downloader -->
+                <div class="tool-card" data-aos="fade-up" data-aos-delay="200">
+                    <div class="tool-icon video-icon">
+                        <i class="fas fa-video"></i>
+                    </div>
+                    <h3 class="tool-title">Video Downloader (MP4)</h3>
+                    <p class="tool-desc">Download YouTube videos in MP4 format with audio</p>
+                    <div class="tool-input-group">
+                        <input type="text" id="videoUrl" placeholder="Paste YouTube video URL...">
+                        <select id="videoQuality">
+                            <option value="2160">4K (2160p)</option>
+                            <option value="1440">2K (1440p)</option>
+                            <option value="1080" selected>Full HD (1080p)</option>
+                            <option value="720">HD (720p)</option>
+                            <option value="480">SD (480p)</option>
+                            <option value="360">360p</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary btn-block" onclick="downloadVideo()">
+                        <i class="fas fa-download"></i> Download Video
+                    </button>
+                    <div id="videoResult" class="tool-result"></div>
+                </div>
+
+                <!-- Video Without Audio -->
+                <div class="tool-card" data-aos="fade-up" data-aos-delay="300">
+                    <div class="tool-icon noaudio-icon">
+                        <i class="fas fa-video-slash"></i>
+                    </div>
+                    <h3 class="tool-title">Video Without Audio</h3>
+                    <p class="tool-desc">Download YouTube video without audio track (silent video)</p>
+                    <div class="tool-input-group">
+                        <input type="text" id="noaudioUrl" placeholder="Paste YouTube video URL...">
+                        <select id="noaudioQuality">
+                            <option value="1080" selected>Full HD (1080p)</option>
+                            <option value="720">HD (720p)</option>
+                            <option value="480">SD (480p)</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary btn-block" onclick="downloadVideoNoAudio()">
+                        <i class="fas fa-download"></i> Download Video (No Audio)
+                    </button>
+                    <div id="noaudioResult" class="tool-result"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Generators Section -->
+    <section class="section generators-section" id="generators">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">Content Generators</span>
+                <h2 class="section-title">YouTube Content Generators</h2>
+                <p class="section-subtitle">Generate optimized descriptions, hashtags & tags instantly</p>
+            </div>
+
+            <div class="generators-grid">
+                <!-- Description Generator -->
+                <div class="generator-card" data-aos="fade-up">
+                    <div class="generator-header">
+                        <i class="fas fa-align-left"></i>
+                        <h3>Description Generator</h3>
+                    </div>
+                    <div class="generator-body">
+                        <div class="form-group">
+                            <label>Video Title *</label>
+                            <input type="text" id="descTitle" placeholder="Enter your video title...">
+                        </div>
+                        <div class="form-group">
+                            <label>Topic / Keywords</label>
+                            <input type="text" id="descTopic" placeholder="Main topic of your video...">
+                        </div>
+                        <div class="form-group">
+                            <label>Tone</label>
+                            <select id="descTone">
+                                <option value="professional">Professional</option>
+                                <option value="casual">Casual</option>
+                                <option value="funny">Funny</option>
+                                <option value="informative">Informative</option>
+                                <option value="promotional">Promotional</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Include</label>
+                            <div class="checkbox-group">
+                                <label class="checkbox">
+                                    <input type="checkbox" id="descIncludeLinks" checked> Social Links
+                                </label>
+                                <label class="checkbox">
+                                    <input type="checkbox" id="descIncludeTimestamps"> Timestamps
+                                </label>
+                                <label class="checkbox">
+                                    <input type="checkbox" id="descIncludeCTA" checked> Call to Action
+                                </label>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary btn-block" onclick="generateDescription()">
+                            <i class="fas fa-magic"></i> Generate Description
+                        </button>
+                        <div id="descResult" class="generator-result">
+                            <div class="result-header">
+                                <span>Generated Description</span>
+                                <button class="btn-icon" onclick="copyResult('descOutput')" title="Copy">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <textarea id="descOutput" readonly placeholder="Your generated description will appear here..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hashtag Generator -->
+                <div class="generator-card" data-aos="fade-up" data-aos-delay="100">
+                    <div class="generator-header">
+                        <i class="fas fa-hashtag"></i>
+                        <h3>Hashtag Generator</h3>
+                    </div>
+                    <div class="generator-body">
+                        <div class="form-group">
+                            <label>Topic or Title *</label>
+                            <input type="text" id="hashTopic" placeholder="Enter topic or video title...">
+                        </div>
+                        <div class="form-group">
+                            <label>Platform</label>
+                            <select id="hashPlatform">
+                                <option value="youtube">YouTube</option>
+                                <option value="instagram">Instagram</option>
+                                <option value="tiktok">TikTok</option>
+                                <option value="twitter">Twitter/X</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Number of Hashtags</label>
+                            <input type="range" id="hashCount" min="5" max="30" value="15">
+                            <span class="range-value" id="hashCountValue">15</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Type</label>
+                            <div class="radio-group">
+                                <label class="radio">
+                                    <input type="radio" name="hashType" value="trending" checked> Trending
+                                </label>
+                                <label class="radio">
+                                    <input type="radio" name="hashType" value="niche"> Niche
+                                </label>
+                                <label class="radio">
+                                    <input type="radio" name="hashType" value="mixed"> Mixed
+                                </label>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary btn-block" onclick="generateHashtags()">
+                            <i class="fas fa-magic"></i> Generate Hashtags
+                        </button>
+                        <div id="hashResult" class="generator-result">
+                            <div class="result-header">
+                                <span>Generated Hashtags</span>
+                                <button class="btn-icon" onclick="copyResult('hashOutput')" title="Copy">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <div id="hashOutput" class="hashtag-output" placeholder="Your hashtags will appear here..."></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tags Generator -->
+                <div class="generator-card" data-aos="fade-up" data-aos-delay="200">
+                    <div class="generator-header">
+                        <i class="fas fa-tags"></i>
+                        <h3>Tags Generator</h3>
+                    </div>
+                    <div class="generator-body">
+                        <div class="form-group">
+                            <label>Video Title *</label>
+                            <input type="text" id="tagTitle" placeholder="Enter your video title...">
+                        </div>
+                        <div class="form-group">
+                            <label>Category</label>
+                            <select id="tagCategory">
+                                <option value="general">General</option>
+                                <option value="gaming">Gaming</option>
+                                <option value="tech">Technology</option>
+                                <option value="education">Education</option>
+                                <option value="entertainment">Entertainment</option>
+                                <option value="music">Music</option>
+                                <option value="sports">Sports</option>
+                                <option value="cooking">Cooking</option>
+                                <option value="travel">Travel</option>
+                                <option value="fitness">Fitness</option>
+                                <option value="beauty">Beauty</option>
+                                <option value="finance">Finance</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Tag Count</label>
+                            <input type="number" id="tagCount" value="30" min="10" max="50">
+                        </div>
+                        <button class="btn btn-primary btn-block" onclick="generateTags()">
+                            <i class="fas fa-magic"></i> Generate Tags
+                        </button>
+                        <div id="tagResult" class="generator-result">
+                            <div class="result-header">
+                                <span>Generated Tags</span>
+                                <button class="btn-icon" onclick="copyResult('tagOutput')" title="Copy">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <div id="tagOutput" class="tag-output" placeholder="Your tags will appear here..."></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Title Optimizer -->
+                <div class="generator-card" data-aos="fade-up" data-aos-delay="300">
+                    <div class="generator-header">
+                        <i class="fas fa-bullseye"></i>
+                        <h3>Title Optimizer</h3>
+                    </div>
+                    <div class="generator-body">
+                        <div class="form-group">
+                            <label>Your Title *</label>
+                            <input type="text" id="optTitle" placeholder="Enter your draft title...">
+                        </div>
+                        <div class="form-group">
+                            <label>Target Keyword</label>
+                            <input type="text" id="optKeyword" placeholder="Main keyword to rank for...">
+                        </div>
+                        <div class="form-group">
+                            <label>Optimization Goal</label>
+                            <select id="optGoal">
+                                <option value="clicks">More Clicks (CTR)</option>
+                                <option value="seo">SEO Ranking</option>
+                                <option value="viral">Viral Potential</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary btn-block" onclick="optimizeTitle()">
+                            <i class="fas fa-magic"></i> Optimize Title
+                        </button>
+                        <div id="optResult" class="generator-result">
+                            <div class="result-header">
+                                <span>Optimized Titles</span>
+                                <button class="btn-icon" onclick="copyResult('optOutput')" title="Copy">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <div id="optOutput" class="title-output" placeholder="Your optimized titles will appear here..."></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SEO Tools Section -->
+    <section class="section seo-section" id="seo">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">SEO Tool</span>
+                <h2 class="section-title">YouTube Channel Analyzer</h2>
+                <p class="section-subtitle">Analyze any YouTube channel's performance and get insights</p>
+            </div>
+
+            <div class="seo-single">
+                <div class="seo-card-large">
+                    <div class="seo-icon-large">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <h3>Analyze YouTube Channel</h3>
+                    <p>Enter any YouTube channel name or URL to get detailed analysis including subscribers, views, engagement rate, and growth recommendations.</p>
+                    <div class="seo-input-group-large">
+                        <input type="text" id="channelInput" placeholder="Enter channel name or URL (e.g., @MrBeast)">
+                        <button class="btn btn-primary" onclick="analyzeChannel()">
+                            <i class="fas fa-chart-bar"></i> Analyze Channel
+                        </button>
+                    </div>
+                    <div id="channelResults" class="seo-results"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Exclusive Features Section -->
+    <section class="section exclusive-section" id="exclusive">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">Exclusive</span>
+                <h2 class="section-title">Why Choose YT All-Rounder?</h2>
+                <p class="section-subtitle">Features you won't find anywhere else</p>
+            </div>
+
+            <div class="exclusive-grid">
+                <div class="exclusive-card" data-aos="fade-up">
+                    <div class="exclusive-icon">
+                        <i class="fas fa-bolt"></i>
+                    </div>
+                    <h3>Lightning Fast</h3>
+                    <p>All tools work instantly in your browser. No waiting, no queues.</p>
+                </div>
+                <div class="exclusive-card" data-aos="fade-up" data-aos-delay="100">
+                    <div class="exclusive-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h3>100% Secure</h3>
+                    <p>No data stored. Everything processes locally in your browser.</p>
+                </div>
+                <div class="exclusive-card" data-aos="fade-up" data-aos-delay="200">
+                    <div class="exclusive-icon">
+                        <i class="fas fa-ad"></i>
+                    </div>
+                    <h3>No Sign-up</h3>
+                    <p>No registration required. Use all tools anonymously.</p>
+                </div>
+                <div class="exclusive-card" data-aos="fade-up" data-aos-delay="300">
+                    <div class="exclusive-icon">
+                        <i class="fas fa-mobile-alt"></i>
+                    </div>
+                    <h3>Mobile Friendly</h3>
+                    <p>Works perfectly on all devices - phone, tablet, desktop.</p>
+                </div>
+                <div class="exclusive-card" data-aos="fade-up" data-aos-delay="400">
+                    <div class="exclusive-icon">
+                        <i class="fas fa-code"></i>
+                    </div>
+                    <h3>Open Source</h3>
+                    <p>Transparent code. You can verify no hidden data collection.</p>
+                </div>
+                <div class="exclusive-card" data-aos="fade-up" data-aos-delay="500">
+                    <div class="exclusive-icon">
+                        <i class="fas fa-headset"></i>
+                    </div>
+                    <h3>Free Forever</h3>
+                    <p>All tools remain free. No premium tiers or hidden charges.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- About Section -->
+    <section class="section about-section" id="about">
+        <div class="container">
+            <div class="about-content">
+                <div class="about-text" data-aos="fade-right">
+                    <span class="section-badge">About</span>
+                    <h2>About YouTube All-Rounder</h2>
+                    <p>YouTube All-Rounder is a comprehensive suite of free tools designed for content creators, marketers, and YouTube enthusiasts. Our tools help you download, optimize, and enhance your YouTube content strategy.</p>
+                    <p>Whether you need to download thumbnails for your blog, extract audio for a podcast, or generate SEO-optimized descriptions and hashtags, we've got you covered.</p>
+                    <div class="about-features">
+                        <div class="about-feature">
+                            <i class="fas fa-check-circle"></i>
+                            <span>No Registration Required</span>
+                        </div>
+                        <div class="about-feature">
+                            <i class="fas fa-check-circle"></i>
+                            <span>100% Free to Use</span>
+                        </div>
+                        <div class="about-feature">
+                            <i class="fas fa-check-circle"></i>
+                            <span>Works on All Devices</span>
+                        </div>
+                        <div class="about-feature">
+                            <i class="fas fa-check-circle"></i>
+                            <span>Fast & Reliable</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="about-visual" data-aos="fade-left">
+                    <div class="about-card-stack">
+                        <div class="about-card card-1">
+                            <i class="fas fa-image"></i>
+                            <span>Thumbnails</span>
+                        </div>
+                        <div class="about-card card-2">
+                            <i class="fas fa-music"></i>
+                            <span>Audio</span>
+                        </div>
+                        <div class="about-card card-3">
+                            <i class="fas fa-video"></i>
+                            <span>Videos</span>
+                        </div>
+                        <div class="about-card card-4">
+                            <i class="fas fa-hashtag"></i>
+                            <span>SEO</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Buy Me a Coffee Section -->
+    <section class="section support-section" id="support">
+        <div class="container">
+            <div class="support-card">
+                <div class="coffee-icon">
+                    <i class="fas fa-coffee"></i>
+                </div>
+                <h2>Support This Project</h2>
+                <p>If you find these tools helpful, consider buying me a coffee! Your support helps keep this project free and updated.</p>
+                <div class="support-options">
+                    <a href="https://www.buymeacoffee.com/YOURUSERNAME" target="_blank" class="btn btn-coffee">
+                        <i class="fas fa-coffee"></i> Buy Me a Coffee
+                    </a>
+                    <div class="qr-section">
+                        <p>Or scan QR code to donate:</p>
+                        <div class="qr-placeholder" id="qrCode">
+                            <i class="fas fa-qrcode"></i>
+                            <span>Your QR Code Here</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-col">
+                    <a href="#" class="footer-logo">
+                        <i class="fab fa-youtube"></i>
+                        <span>YT All-Rounder</span>
+                    </a>
+                    <p>Free YouTube tools for content creators. Download, optimize, and grow your channel.</p>
+                    <div class="social-links">
+                        <a href="#" class="social-link"><i class="fab fa-twitter"></i></a>
+                        <a href="#" class="social-link"><i class="fab fa-instagram"></i></a>
+                        <a href="#" class="social-link"><i class="fab fa-github"></i></a>
+                        <a href="#" class="social-link"><i class="fab fa-youtube"></i></a>
+                    </div>
+                </div>
+                <div class="footer-col">
+                    <h4>Download Tools</h4>
+                    <ul>
+                        <li><a href="#tools">Thumbnail Downloader</a></li>
+                        <li><a href="#tools">Audio Downloader</a></li>
+                        <li><a href="#tools">Video Downloader</a></li>
+                        <li><a href="#tools">Video Without Audio</a></li>
+                    </ul>
+                </div>
+                <div class="footer-col">
+                    <h4>Generators</h4>
+                    <ul>
+                        <li><a href="#generators">Description Generator</a></li>
+                        <li><a href="#generators">Hashtag Generator</a></li>
+                        <li><a href="#generators">Tags Generator</a></li>
+                        <li><a href="#generators">Title Optimizer</a></li>
+                    </ul>
+                </div>
+                <div class="footer-col">
+                    <h4>SEO Tools</h4>
+                    <ul>
+                        <li><a href="#seo">Keyword Research</a></li>
+                        <li><a href="#seo">Channel Analyzer</a></li>
+                        <li><a href="#seo">Trending Topics</a></li>
+                        <li><a href="#seo">Rank Tracker</a></li>
+                    </ul>
+                </div>
+                <div class="footer-col">
+                    <h4>Legal</h4>
+                    <ul>
+                        <li><a href="#">Privacy Policy</a></li>
+                        <li><a href="#">Terms of Service</a></li>
+                        <li><a href="#">DMCA</a></li>
+                        <li><a href="#">Contact</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 YouTube All-Rounder. All rights reserved. Not affiliated with YouTube/Google.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Back to Top -->
+    <button class="back-to-top" id="backToTop">
+        <i class="fas fa-arrow-up"></i>
+    </button>
+
+    <!-- Toast Notification -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/downloads.js"></script>
+    <script src="js/generators.js"></script>
+</body>
+</html>
