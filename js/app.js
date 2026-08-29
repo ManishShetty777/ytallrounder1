@@ -430,8 +430,29 @@ async function analyzeChannel() {
         const parsed = parseChannelIdOrHandle(channelInput);
         const data = await fetchChannelData(parsed);
 
+        // Track if data is real or estimated
+        const isRealData = !!(data.subscriberCount || data.subCount || data.totalViews || data.views || data.videos || data.videoCount || data.author || data.name);
+
         // Real data from Piped - handle missing fields
         const channelName = data.name || data.uploader || data.author || parsed.value;
+        const subscribers = data.subscriberCount ?? data.subscribers ?? data.subCount ?? 0;
+        let totalViews = data.views ?? data.viewCount ?? data.totalViews ?? 0;
+        let videos = data.videos ?? data.videoCount ?? 0;
+        // Piped/Invidious may put videos in relatedStreams/latestVideos
+        const related = data.relatedStreams || data.latestVideos || [];
+        if (!videos && related.length) videos = related.length;
+        // If totalViews still 0, sum views from related/latests
+        if (!totalViews && related.length) {
+            totalViews = related.reduce((sum, v) => sum + (v.views || v.viewCount || 0), 0);
+            // if sum is 0, estimate: subs * 75
+            if (!totalViews) totalViews = subscribers * 75;
+        }
+        if (!totalViews && subscribers) totalViews = subscribers * 80;
+        const avatar = data.avatarUrl || data.thumbnailUrl || data.authorThumbnails?.[2]?.url || data.authorThumbnails?.[0]?.url || '';
+        const verified = data.verified || data.authorVerified || false;
+        const description = data.description || data.descriptionHtml || '';
+        const avgViews = videos ? Math.floor(totalViews / Math.max(videos,1)) : (subscribers ? Math.floor(totalViews / 100) : 0);
+        const engagement = subscribers && avgViews ? ((avgViews / Math.max(subscribers,1))*100).toFixed(2) : (subscribers ? '2.50' : '0.00');
         const subscribers = data.subscriberCount ?? data.subscribers ?? data.subCount ?? 0;
         let totalViews = data.views ?? data.viewCount ?? data.totalViews ?? 0;
         let videos = data.videos ?? data.videoCount ?? 0;
@@ -481,6 +502,9 @@ async function analyzeChannel() {
         const avatarHtml = avatar ? `<img src="${avatar}" alt="avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%">` : channelName.charAt(0).toUpperCase();
         const verifiedHtml = verified ? ' <i class="fas fa-check-circle" style="color:#1da1f2"></i>' : '';
         const tierHtml = `<span class="ch-tier" style="color:${tierColor}">${tier} Creator${verifiedHtml}</span>`;
+        const dataSourceBadge = isRealData 
+            ? `<span style="color:#4caf50;font-size:0.7rem"><i class="fas fa-check-circle"></i> Real API Data</span>`
+            : `<span style="color:#ff9800;font-size:0.7rem"><i class="fas fa-exclamation-triangle"></i> Estimated (API blocked)</span>`;
         let html = `
             <div class="channel-result">
                 <div class="ch-header">
@@ -489,7 +513,8 @@ async function analyzeChannel() {
                     </div>
                     <div class="ch-info">
                         <h4>${escapeHtml(channelName)}</h4>
-                        ${tierHtml} <small style="color:var(--text-muted);display:block;font-size:0.75rem;margin-top:2px"><i class="fas fa-check"></i> Real YouTube data via Piped</small>
+                        ${tierHtml} 
+                        <small style="color:var(--text-muted);display:block;font-size:0.75rem;margin-top:2px">${dataSourceBadge}</small>
                     </div>
                     <div class="ch-score-circle">
                         <svg viewBox="0 0 100 100">
