@@ -175,7 +175,7 @@
                             <option value="128">128kbps</option>
                         </select>
                     </div>
-                    <button class="btn btn-primary btn-block" onclick="downloadAudio()">
+                    <button id="audioDownloadBtn" class="btn btn-primary btn-block" onclick="downloadAudio()">
                         <i class="fas fa-download"></i> Download Audio
                     </button>
                     <div id="audioResult" class="tool-result"></div>
@@ -199,7 +199,7 @@
                             <option value="360">360p</option>
                         </select>
                     </div>
-                    <button class="btn btn-primary btn-block" onclick="downloadVideo()">
+                    <button id="videoDownloadBtn" class="btn btn-primary btn-block" onclick="downloadVideo()">
                         <i class="fas fa-download"></i> Download Video
                     </button>
                     <div id="videoResult" class="tool-result"></div>
@@ -220,7 +220,7 @@
                             <option value="480">SD (480p)</option>
                         </select>
                     </div>
-                    <button class="btn btn-primary btn-block" onclick="downloadVideoNoAudio()">
+                    <button id="noaudioDownloadBtn" class="btn btn-primary btn-block" onclick="downloadVideoNoAudio()">
                         <i class="fas fa-download"></i> Download Video (No Audio)
                     </button>
                     <div id="noaudioResult" class="tool-result"></div>
