@@ -1,8 +1,29 @@
-// Vercel Serverless Function - Resolve Media Stream URL Endpoint
-// Resolves the direct media URL and returns JSON { downloadUrl, filename, mimeType }
-// Avoids function timeouts by letting the client browser download directly from the resolved CDN
+// Vercel Serverless Function - Resolve Media Download URL Endpoint
+// Extraction Priority:
+// Tier 1: youtubei.js (ANDROID / TV_EMBEDDED Client without cookies)
+// Tier 2: @distube/ytdl-core (Authenticated with YOUTUBE_COOKIE)
+// Tier 3: Hosted Cobalt API (if COBALT_API_URL is configured)
 
 const ytdl = require('@distube/ytdl-core');
+
+let cachedInnertube = null;
+
+async function getInnertube(clientType) {
+  const { Innertube, UniversalCache, ClientType } = await import('youtubei.js');
+  const targetClient = clientType || ClientType.ANDROID;
+  
+  if (cachedInnertube && cachedInnertube.session?.client_type === targetClient) {
+    return cachedInnertube;
+  }
+
+  cachedInnertube = await Innertube.create({
+    cache: new UniversalCache(false),
+    client_type: targetClient,
+    generate_session_locally: true,
+    retrieve_player: true
+  });
+  return cachedInnertube;
+}
 
 function parseCookies(cookieInput) {
   if (!cookieInput) return null;
@@ -47,7 +68,7 @@ module.exports = async (req, res) => {
   if (!videoID || videoID.length !== 11) {
     return res.status(400).json({
       success: false,
-      error: 'Invalid YouTube Video ID. Must be 11 characters.',
+      error: 'Invalid YouTube Video ID. Must be an 11-character identifier.',
       code: 400
     });
   }
@@ -58,14 +79,83 @@ module.exports = async (req, res) => {
   const filename = cleanTitle.toLowerCase().endsWith(`.${ext}`) ? cleanTitle : `${cleanTitle}.${ext}`;
 
   const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
-  console.log(`[API /download] Resolving direct download URL for ${videoID} (${type}, ${quality})`);
+  console.log(`[API /download] Resolving download URL for ${videoID} (${type}, ${quality})`);
 
-  let lastError = null;
+  const tierErrors = [];
 
   // ----------------------------------------------------
-  // TIER 1: Authenticated @distube/ytdl-core Format URL Resolution
+  // TIER 1 (PRIMARY): youtubei.js (ANDROID / TV_EMBEDDED context without cookies)
   // ----------------------------------------------------
   try {
+    const { ClientType } = await import('youtubei.js');
+    const clientCandidates = [ClientType.ANDROID, ClientType.TV_EMBEDDED];
+
+    for (const clientType of clientCandidates) {
+      try {
+        console.log(`[API /download] Tier 1: Trying youtubei.js with ${clientType} context...`);
+        const yt = await getInnertube(clientType);
+        const info = await yt.getBasicInfo(videoID);
+
+        if (!info) throw new Error('Empty response from Innertube');
+
+        const streamingData = info.streaming_data;
+        if (!streamingData) {
+          const status = info.playability_status?.status || 'UNKNOWN';
+          const reason = info.playability_status?.reason || 'No streaming data';
+          throw new Error(`Streaming data unavailable (${status}: ${reason})`);
+        }
+
+        const formats = [
+          ...(Array.isArray(streamingData.formats) ? streamingData.formats : []),
+          ...(Array.isArray(streamingData.adaptive_formats) ? streamingData.adaptive_formats : [])
+        ];
+
+        if (formats.length === 0) throw new Error('Formats array is empty');
+
+        const targetFormat = type === 'audio'
+          ? formats.find(f => f?.has_audio && !f?.has_video) || formats.find(f => f?.has_audio)
+          : formats.find(f => f?.has_video && f?.has_audio) || formats.find(f => f?.has_video);
+
+        if (targetFormat) {
+          let resolvedUrl = targetFormat.url;
+          if (!resolvedUrl && typeof targetFormat.decipher === 'function') {
+            try {
+              resolvedUrl = await targetFormat.decipher(yt.session.player);
+            } catch (dErr) {
+              console.warn(`[API /download] Tier 1 decipher warning: ${dErr.message}`);
+            }
+          }
+
+          if (resolvedUrl && typeof resolvedUrl === 'string') {
+            console.log(`[API /download] Tier 1 SUCCESS (${clientType}): itag ${targetFormat.itag}`);
+            return res.status(200).json({
+              success: true,
+              downloadUrl: resolvedUrl,
+              filename,
+              mimeType,
+              format: {
+                itag: targetFormat.itag,
+                quality: targetFormat.quality_label || targetFormat.quality || 'Audio'
+              },
+              provider: `youtubei.js-${clientType.toLowerCase()}`
+            });
+          }
+        }
+      } catch (clientErr) {
+        console.warn(`[API /download] Tier 1 (${clientType}) attempt failed: ${clientErr.message}`);
+      }
+    }
+    throw new Error('youtubei.js failed to resolve a playable direct URL on both ANDROID and TV_EMBEDDED clients.');
+  } catch (t1Err) {
+    console.error('[API /download] Tier 1 RAW ERROR:', t1Err.message);
+    tierErrors.push({ tier: 'youtubei.js', message: t1Err.message });
+  }
+
+  // ----------------------------------------------------
+  // TIER 2 (BACKUP): @distube/ytdl-core (Authenticated with YOUTUBE_COOKIE)
+  // ----------------------------------------------------
+  try {
+    console.log('[API /download] Tier 2: Trying @distube/ytdl-core fallback...');
     const cookieEnv = process.env.YOUTUBE_COOKIE || process.env.COOKIE || '';
     const parsedCookies = parseCookies(cookieEnv);
     let agent = undefined;
@@ -73,12 +163,12 @@ module.exports = async (req, res) => {
     if (parsedCookies) {
       try {
         agent = ytdl.createAgent(parsedCookies);
-        console.log(`[API /download] Tier 1: Agent initialized with ${parsedCookies.length} session cookies`);
+        console.log(`[API /download] Tier 2: Agent initialized with ${parsedCookies.length} session cookies`);
       } catch (agentErr) {
-        console.warn('[API /download] Tier 1 agent error:', agentErr.message);
+        console.warn('[API /download] Tier 2 agent error:', agentErr.message);
       }
     } else {
-      console.warn('[API /download] YOUTUBE_COOKIE is unset in environment variables; running anonymous Tier 1 request');
+      console.warn('[API /download] Tier 2: YOUTUBE_COOKIE is unset; running unauthenticated ytdl-core');
     }
 
     const filter = type === 'audio' ? 'audioonly' : type === 'videoonly' ? 'videoonly' : 'audioandvideo';
@@ -93,9 +183,13 @@ module.exports = async (req, res) => {
       }
     });
 
+    if (!info || !Array.isArray(info.formats)) {
+      throw new Error('YTDL did not return a valid formats array');
+    }
+
     const format = ytdl.chooseFormat(info.formats, { filter, quality: qualityOpt });
     if (format && format.url) {
-      console.log(`[API /download] Tier 1 SUCCESS: Resolved direct URL for itag ${format.itag}`);
+      console.log(`[API /download] Tier 2 SUCCESS: itag ${format.itag}`);
       return res.status(200).json({
         success: true,
         downloadUrl: format.url,
@@ -109,74 +203,26 @@ module.exports = async (req, res) => {
         provider: 'ytdl-core' + (parsedCookies ? '-authenticated' : '')
       });
     }
-  } catch (t1Err) {
-    lastError = t1Err;
-    console.warn('[API /download] Tier 1 (ytdl-core) failed:', t1Err.message);
-  }
-
-  // ----------------------------------------------------
-  // TIER 2: YouTube.js Dynamic ESM Import (TV Context URL Resolution)
-  // ----------------------------------------------------
-  try {
-    const { Innertube, UniversalCache, ClientType } = await import('youtubei.js');
-    const yt = await Innertube.create({
-      cache: new UniversalCache(false),
-      client_type: ClientType.TV,
-      generate_session_locally: true,
-      retrieve_player: true
-    });
-
-    const info = await yt.getInfo(videoID);
-    const streamingData = info?.streaming_data;
-    if (streamingData) {
-      const formats = [
-        ...(Array.isArray(streamingData.formats) ? streamingData.formats : []),
-        ...(Array.isArray(streamingData.adaptive_formats) ? streamingData.adaptive_formats : [])
-      ];
-
-      const targetFormat = type === 'audio'
-        ? formats.find(f => f?.has_audio && !f?.has_video) || formats.find(f => f?.has_audio)
-        : formats.find(f => f?.has_video && f?.has_audio) || formats.find(f => f?.has_video);
-
-      if (targetFormat) {
-        let streamUrl = targetFormat.url;
-        if (!streamUrl && typeof targetFormat.decipher === 'function') {
-          try {
-            streamUrl = await targetFormat.decipher(yt.session.player);
-          } catch (dErr) {}
-        }
-
-        if (streamUrl && typeof streamUrl === 'string') {
-          console.log(`[API /download] Tier 2 SUCCESS: Resolved Innertube URL for itag ${targetFormat.itag}`);
-          return res.status(200).json({
-            success: true,
-            downloadUrl: streamUrl,
-            filename,
-            mimeType,
-            format: {
-              itag: targetFormat.itag,
-              quality: targetFormat.quality_label || targetFormat.quality || 'Audio'
-            },
-            provider: 'youtubei.js-tv'
-          });
-        }
-      }
-    }
+    throw new Error('ytdl-core could not find a playable format matching request');
   } catch (t2Err) {
-    lastError = t2Err;
-    console.warn('[API /download] Tier 2 (youtubei.js) failed:', t2Err.message);
+    console.error('[API /download] Tier 2 RAW ERROR:', t2Err.message);
+    tierErrors.push({ tier: 'ytdl-core', message: t2Err.message });
   }
 
   // ----------------------------------------------------
-  // TIER 3: Hosted Cobalt API Endpoint (Env-Var Only)
+  // TIER 3 (HOSTED FALLBACK): Cobalt API (Env-Var Only)
   // ----------------------------------------------------
   const cobaltBase = process.env.COBALT_API_URL || null;
-  if (cobaltBase) {
+  if (!cobaltBase) {
+    console.warn('[API /download] Tier 3: COBALT_API_URL is unset; skipping hosted Cobalt tier');
+    tierErrors.push({ tier: 'cobalt-api', message: 'COBALT_API_URL is unset in environment' });
+  } else {
     try {
+      console.log(`[API /download] Tier 3: Calling custom Cobalt instance at ${cobaltBase}...`);
       const cobaltHeaders = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       };
       if (process.env.COBALT_API_KEY) {
         cobaltHeaders['Authorization'] = `Api-Key ${process.env.COBALT_API_KEY}`;
@@ -217,35 +263,26 @@ module.exports = async (req, res) => {
           });
         }
       }
+      throw new Error(`Cobalt returned HTTP ${cobaltRes.status}`);
     } catch (t3Err) {
-      lastError = t3Err;
-      console.warn('[API /download] Tier 3 (Cobalt) failed:', t3Err.message);
+      console.error('[API /download] Tier 3 RAW ERROR:', t3Err.message);
+      tierErrors.push({ tier: 'cobalt-api', message: t3Err.message });
     }
   }
 
   // ----------------------------------------------------
-  // Diagnostic Error Response
+  // Structured Diagnostic Response
   // ----------------------------------------------------
-  const errMsg = lastError?.message || 'Download URL resolution failed';
-  let statusCode = 503;
-  let userFriendlyError = 'Extraction service temporarily unavailable. Please retry in a few moments.';
+  const allTierDetails = tierErrors.map(e => `[${e.tier}]: ${e.message}`).join(' | ');
+  console.error('[API /download] ALL TIERS FAILED:', allTierDetails);
 
-  if (errMsg.includes('429') || errMsg.includes('Sign in to confirm you\'re not a bot') || errMsg.includes('bot')) {
-    statusCode = 429;
-    userFriendlyError = 'YouTube bot protection temporarily blocked this datacenter request. Set YOUTUBE_COOKIE in Vercel environment variables to enable 100% continuous extraction.';
-  } else if (errMsg.includes('404') || errMsg.includes('Video unavailable')) {
-    statusCode = 404;
-    userFriendlyError = 'This video is unavailable or has been deleted from YouTube.';
-  } else if (errMsg.includes('403') || errMsg.includes('private video')) {
-    statusCode = 403;
-    userFriendlyError = 'This video is private, age-restricted, or region-restricted.';
-  }
-
-  return res.status(statusCode).json({
+  return res.status(503).json({
     success: false,
-    error: userFriendlyError,
-    code: statusCode,
-    details: errMsg.substring(0, 180),
+    code: 503,
+    reason: 'EXTRACTION_PIPELINE_FAILED',
+    error: 'Extraction failed across all available providers.',
+    details: allTierDetails,
+    tierErrors,
     videoID
   });
 };
