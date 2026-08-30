@@ -297,166 +297,113 @@ async function probeAndExtractStream(videoID, type, quality, meta, box, retryCal
     }
 }
 
-// Production Download Execution (Resolve URL & Direct Client Download)
-async function executeProductionDownload(videoID, type, quality, filename, btnId, errorBoxId) {
+// Production Download Execution (Same-origin attachment delivery)
+function executeProductionDownload(videoID, type, quality, filename, btnId, resultBoxId) {
     const btn = document.getElementById(btnId);
-    const errBox = errorBoxId ? document.getElementById(errorBoxId) : null;
+    const resultBox = resultBoxId ? document.getElementById(resultBoxId) : null;
 
-    if (errBox) errBox.style.display = 'none';
-
-    // UI State: Starting download...
     if (btn) {
-        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Resolving download stream...`;
+        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Sending to your device...`;
         btn.disabled = true;
         btn.classList.remove('dl-btn-retry');
     }
 
-    showToast('Resolving media stream...', 'info');
-
-    const downloadEndpoint = `/api/download?id=${encodeURIComponent(videoID)}&type=${encodeURIComponent(type)}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(filename)}`;
-
-    try {
-        const response = await fetch(downloadEndpoint, {
-            method: 'GET',
-            headers: { 'Accept': 'application/json' }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.success || !data.downloadUrl) {
-            const errorMsg = data.error || `Failed to resolve stream (HTTP ${response.status})`;
-            throw new Error(errorMsg);
-        }
-
-        const directUrl = data.downloadUrl;
-        const targetFilename = data.filename || filename;
-
-        if (btn) {
-            btn.innerHTML = `<i class="fas fa-download fa-bounce"></i> Downloading file...`;
-        }
-
-        // Try direct in-browser Blob download stream
-        let downloadSuccessful = false;
-        try {
-            const mediaRes = await fetch(directUrl, { mode: 'cors' });
-            if (mediaRes.ok) {
-                const contentLengthHeader = mediaRes.headers.get('content-length');
-                const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
-                let receivedBytes = 0;
-
-                const reader = mediaRes.body.getReader();
-                const chunks = [];
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    chunks.push(value);
-                    receivedBytes += value.length;
-
-                    if (totalBytes > 0 && btn) {
-                        const pct = Math.min(99, Math.round((receivedBytes / totalBytes) * 100));
-                        btn.innerHTML = `<i class="fas fa-download fa-bounce"></i> Downloading (${pct}%)...`;
-                    }
-                }
-
-                const blob = new Blob(chunks, { type: data.mimeType || (type === 'audio' ? 'audio/mpeg' : 'video/mp4') });
-                if (blob.size > 0) {
-                    const blobUrl = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = blobUrl;
-                    a.download = targetFilename;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    setTimeout(() => URL.revokeObjectURL(blobUrl), 20000);
-                    downloadSuccessful = true;
-                }
-            }
-        } catch (corsErr) {
-            console.warn('[Direct Blob fetch fallback to native download anchor]:', corsErr);
-        }
-
-        // Native download trigger fallback if CORS prevents direct byte reading
-        if (!downloadSuccessful) {
-            const a = document.createElement('a');
-            a.href = directUrl;
-            a.download = targetFilename;
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-        }
-
-        showToast('Download started! File is saving to your device.', 'success');
-
-        if (btn) {
-            btn.innerHTML = `<i class="fas fa-check-circle"></i> Download Complete (Click to download again)`;
-            btn.disabled = false;
-        }
-    } catch (err) {
-        console.error('[Download Error]:', err);
-        showToast('Download failed: ' + err.message, 'error');
-
-        if (btn) {
-            btn.innerHTML = `<i class="fas fa-redo"></i> Download Failed - Retry`;
-            btn.disabled = false;
-            btn.classList.add('dl-btn-retry');
-        }
-
-        if (errBox) {
-            errBox.style.display = 'flex';
-            errBox.innerHTML = `
-                <div class="dl-error-title"><i class="fas fa-times"></i> Download Error</div>
-                <div>${escapeHtml(err.message)}</div>
-            `;
-        }
+    if (resultBox) {
+        resultBox.style.display = 'block';
+        resultBox.innerHTML = `
+            <div class="dl-ready-note">
+                <i class="fas fa-download"></i>
+                <span>Your ${type === 'audio' ? 'audio' : 'video'} download is being sent directly to this device.</span>
+            </div>
+        `;
     }
+
+    const downloadEndpoint = `/api/download?id=${encodeURIComponent(videoID)}&type=${encodeURIComponent(type)}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(filename)}&delivery=attachment`;
+    const downloadFrame = document.createElement('iframe');
+    let downloadFailed = false;
+    downloadFrame.hidden = true;
+    downloadFrame.title = 'Device download';
+    downloadFrame.addEventListener('load', () => {
+        try {
+            const responseText = downloadFrame.contentDocument?.body?.textContent?.trim();
+            if (!responseText) return;
+
+            const responseData = JSON.parse(responseText);
+            if (responseData.success !== false) return;
+
+            downloadFailed = true;
+            const errorMessage = responseData.error || 'The download could not be prepared.';
+            if (btn) {
+                btn.innerHTML = `<i class="fas fa-redo"></i> Download Failed - Retry`;
+                btn.disabled = false;
+                btn.classList.add('dl-btn-retry');
+            }
+            if (resultBox) {
+                resultBox.innerHTML = `
+                    <div class="dl-error-box" style="display:flex;">
+                        <div class="dl-error-title"><i class="fas fa-times"></i> Download Error</div>
+                        <div>${escapeHtml(errorMessage)}</div>
+                    </div>
+                `;
+            }
+            showToast('Download failed: ' + errorMessage, 'error');
+        } catch (error) {
+            console.debug('[Download frame response]:', error);
+        }
+    });
+    downloadFrame.src = downloadEndpoint;
+    document.body.appendChild(downloadFrame);
+
+    showToast('Sending download directly to your device...', 'info');
+
+    setTimeout(() => {
+        if (!downloadFailed && btn) {
+            btn.innerHTML = `<i class="fas fa-download"></i> Download Again`;
+            btn.disabled = false;
+        }
+        if (!downloadFailed) showToast('Download started directly on your device.', 'success');
+    }, 1800);
+
+    setTimeout(() => downloadFrame.remove(), 120000);
 }
 
 /* ---------- AUDIO DOWNLOADER (MP3) ---------- */
-async function downloadAudio() {
+function downloadAudio() {
     const url = document.getElementById('audioUrl').value.trim();
     const quality = document.getElementById('audioQuality').value;
-    const box = document.getElementById('audioResult');
 
     if (!url) { showToast('Please enter a YouTube URL', 'error'); return; }
     if (!isValidYouTubeURL(url)) { showToast('Enter a valid YouTube URL', 'error'); return; }
     const videoID = extractVideoID(url);
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
-    const meta = await getYouTubeMetadata(videoID);
-    await probeAndExtractStream(videoID, 'audio', quality, meta, box, downloadAudio);
+    executeProductionDownload(videoID, 'audio', quality, `youtube-audio-${videoID}.mp3`, 'audioDownloadBtn', 'audioResult');
 }
 
 /* ---------- VIDEO DOWNLOADER (MP4) ---------- */
-async function downloadVideo() {
+function downloadVideo() {
     const url = document.getElementById('videoUrl').value.trim();
     const quality = document.getElementById('videoQuality').value;
-    const box = document.getElementById('videoResult');
 
     if (!url) { showToast('Please enter a YouTube URL', 'error'); return; }
     if (!isValidYouTubeURL(url)) { showToast('Enter a valid YouTube URL', 'error'); return; }
     const videoID = extractVideoID(url);
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
-    const meta = await getYouTubeMetadata(videoID);
-    await probeAndExtractStream(videoID, 'video', quality, meta, box, downloadVideo);
+    executeProductionDownload(videoID, 'video', quality, `youtube-video-${videoID}.mp4`, 'videoDownloadBtn', 'videoResult');
 }
 
 /* ---------- VIDEO WITHOUT AUDIO (SILENT / EDITING) ---------- */
-async function downloadVideoNoAudio() {
+function downloadVideoNoAudio() {
     const url = document.getElementById('noaudioUrl').value.trim();
     const quality = document.getElementById('noaudioQuality').value;
-    const box = document.getElementById('noaudioResult');
 
     if (!url) { showToast('Please enter a YouTube URL', 'error'); return; }
     if (!isValidYouTubeURL(url)) { showToast('Enter a valid YouTube URL', 'error'); return; }
     const videoID = extractVideoID(url);
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
-    const meta = await getYouTubeMetadata(videoID);
-    await probeAndExtractStream(videoID, 'videoonly', quality, meta, box, downloadVideoNoAudio);
+    executeProductionDownload(videoID, 'videoonly', quality, `youtube-video-silent-${videoID}.mp4`, 'noaudioDownloadBtn', 'noaudioResult');
 }
 
 function escapeHtml(s) {
