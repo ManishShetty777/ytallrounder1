@@ -117,7 +117,7 @@ const PIPED_INSTANCES = [
     'https://pipedapi.codespace.cz'
 ];
 
-async function fetchWithTimeout(url, ms=8000) {
+async function fetchWithTimeout(url, ms=3000) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), ms);
     try {
@@ -296,7 +296,7 @@ function addDlBoxStyles() {
 }
 function addLoadingStyles(){ addDlBoxStyles(); }
 
-/* ---------- AUDIO DOWNLOADER (FIXED) ---------- */
+/* ---------- AUDIO DOWNLOADER (FAST FALLBACK) ---------- */
 async function downloadAudio() {
     const url = document.getElementById('audioUrl').value.trim();
     const qualitySel = document.getElementById('audioQuality').value;
@@ -306,20 +306,41 @@ async function downloadAudio() {
     const videoID = extractVideoID(url);
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
-    box.innerHTML = '<div class="dl-loading"><div class="spinner"></div><p>Fetching audio streams directly...</p><small style="color:var(--text-muted)">Using Piped API - no redirect, no external site</small></div>';
+    // Show loading + fallback immediately
+    box.innerHTML = `
+        <div class="dl-loading"><div class="spinner"></div><p>Trying direct API...</p>
+        <small style="color:var(--text-muted)">If spinner >3s, use fallback below</small></div>
+        <div id="audioFallback" style="display:none;margin-top:1rem">
+            <div class="dl-error">
+                <i class="fas fa-info-circle" style="color:#ff9800"></i>
+                <p><strong>Direct API blocked by YouTube</strong> (datacenter IP)</p>
+                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Use partner sites - they work 100%:</p>
+                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
+                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp3" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download MP3 via Loader.to</a>
+                    <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}&audio=1" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
+                    <a href="https://www.y2mate.com/youtube/${videoID}" target="_blank" class="btn btn-secondary btn-sm">Y2Mate</a>
+                </div>
+            </div>
+        </div>`;
     addDlBoxStyles();
+
+    // Show fallback after 3 seconds if API still loading
+    const fallbackTimer = setTimeout(() => {
+        const fb = document.getElementById('audioFallback');
+        if (fb) fb.style.display = 'block';
+    }, 3000);
 
     try {
         const data = await getStreamsWithFallback(videoID);
+        clearTimeout(fallbackTimer);
         const audios = (data.audioStreams || []).sort((a,b) => (b.bitrate||0)-(a.bitrate||0));
         if (!audios.length) throw new Error('No audio streams found');
 
-        // Filter by quality? just show all sorted
         let html = `
             <div class="dl-result-box">
                 <div class="dl-head">
                     <div class="dl-icon"><i class="fas fa-music"></i></div>
-                    <div class="dl-info"><strong>${escapeHtml(data.title || 'Audio')}</strong><p>${escapeHtml(data.uploader || '')} • ${audios.length} quality options</p></div>
+                    <div class="dl-info"><strong>${escapeHtml(data.title || 'Audio')}</strong><p>${escapeHtml(data.uploader || '')} • ${audios.length} options</p></div>
                 </div>
                 <div class="dl-video-preview"><img src="https://img.youtube.com/vi/${videoID}/hqdefault.jpg" alt="thumb"></div>
                 <div class="stream-list">
@@ -337,28 +358,19 @@ async function downloadAudio() {
                     </div>
                 </div>`;
         });
-        html += `</div><p style="margin-top:0.8rem;font-size:0.8rem;color:var(--text-muted)"><i class="fas fa-info-circle"></i> If download opens in new tab, right-click → Save As. Works 100% on-site.</p></div>`;
+        html += `</div></div>`;
         box.innerHTML = html;
-        showToast('Audio streams loaded - direct download!', 'success');
+        showToast('Audio streams loaded!', 'success');
     } catch (err) {
+        clearTimeout(fallbackTimer);
         console.error('audio error', err);
-        box.innerHTML = `
-            <div class="dl-error">
-                <i class="fas fa-exclamation-triangle"></i>
-                <p><strong>Direct download blocked by YouTube</strong><br>Try fallback options below:</p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:1rem 0">
-                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp3" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-external-link-alt"></i> Download via Loader.to</a>
-                    <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}" target="_blank" class="btn btn-secondary btn-sm"><i class="fas fa-external-link-alt"></i> 10Downloader</a>
-                    <a href="https://www.y2mate.com/youtube/${videoID}" target="_blank" class="btn btn-secondary btn-sm">Y2Mate</a>
-                </div>
-                <p style="font-size:0.8rem;color:var(--text-muted)">Direct API blocked by YouTube datacenter. Fallback works 100%. Vercel backend will fix this.</p>
-                <button class="btn btn-primary btn-sm" onclick="downloadAudio()"><i class="fas fa-redo"></i> Retry Direct</button>
-            </div>`;
-        showToast('Using fallback download options', 'info');
+        document.getElementById('audioFallback').style.display = 'block';
+        showToast('Using fallback - direct API blocked', 'info');
     }
 }
+}
 
-/* ---------- VIDEO DOWNLOADER (FIXED) ---------- */
+/* ---------- VIDEO DOWNLOADER (FAST FALLBACK) ---------- */
 async function downloadVideo() {
     const url = document.getElementById('videoUrl').value.trim();
     const wantQuality = document.getElementById('videoQuality').value;
@@ -368,20 +380,34 @@ async function downloadVideo() {
     const videoID = extractVideoID(url);
     if (!videoID) { showToast('Bad video ID', 'error'); return; }
 
-    box.innerHTML = '<div class="dl-loading"><div class="spinner"></div><p>Fetching video streams...</p><small style="color:var(--text-muted)">Direct on-site - no external redirect</small></div>';
+    box.innerHTML = `
+        <div class="dl-loading"><div class="spinner"></div><p>Trying direct API...</p>
+        <small style="color:var(--text-muted)">If spinner >3s, use fallback below</small></div>
+        <div id="videoFallback" style="display:none;margin-top:1rem">
+            <div class="dl-error">
+                <i class="fas fa-info-circle" style="color:#ff9800"></i>
+                <p><strong>Direct API blocked by YouTube</strong> (datacenter IP)</p>
+                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Use partner sites - they work 100%:</p>
+                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
+                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp4" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download MP4 via Loader.to</a>
+                    <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
+                    <a href="https://www.y2mate.com/youtube/${videoID}" target="_blank" class="btn btn-secondary btn-sm">Y2Mate</a>
+                </div>
+            </div>
+        </div>`;
     addDlBoxStyles();
+
+    const fallbackTimer = setTimeout(() => {
+        const fb = document.getElementById('videoFallback');
+        if (fb) fb.style.display = 'block';
+    }, 3000);
 
     try {
         const data = await getStreamsWithFallback(videoID);
-        // videoStreams are muxed? piped has videoStreams with audio, and videoOnly
+        clearTimeout(fallbackTimer);
         let videos = (data.videoStreams || []).filter(v => v.videoOnly === false);
         if (!videos.length) videos = data.videoStreams || [];
-        // Sort by quality descending
-        videos.sort((a,b) => {
-            const qa = parseInt(a.quality) || 0;
-            const qb = parseInt(b.quality) || 0;
-            return qb - qa;
-        });
+        videos.sort((a,b) => (parseInt(b.quality)||0) - (parseInt(a.quality)||0));
         if (!videos.length) throw new Error('No video streams');
 
         let html = `
@@ -406,6 +432,17 @@ async function downloadVideo() {
                     </div>
                 </div>`;
         });
+        html += `</div></div>`;
+        box.innerHTML = html;
+        showToast('Video streams loaded!', 'success');
+    } catch (err) {
+        clearTimeout(fallbackTimer);
+        console.error(err);
+        document.getElementById('videoFallback').style.display = 'block';
+        showToast('Using fallback - direct API blocked', 'info');
+    }
+}
+        });
         html += `</div><p style="margin-top:0.8rem;font-size:0.8rem;color:var(--text-muted)"><i class="fas fa-lightbulb"></i> Tip: Choose 720p for best compatibility.</p></div>`;
         box.innerHTML = html;
         showToast('Video streams loaded!', 'success');
@@ -426,7 +463,7 @@ async function downloadVideo() {
     }
 }
 
-/* ---------- VIDEO WITHOUT AUDIO (FIXED) ---------- */
+/* ---------- VIDEO WITHOUT AUDIO (FAST FALLBACK) ---------- */
 async function downloadVideoNoAudio() {
     const url = document.getElementById('noaudioUrl').value.trim();
     const wantQuality = document.getElementById('noaudioQuality').value;
@@ -436,17 +473,32 @@ async function downloadVideoNoAudio() {
     const videoID = extractVideoID(url);
     if (!videoID) { showToast('Bad ID', 'error'); return; }
 
-    box.innerHTML = '<div class="dl-loading"><div class="spinner"></div><p>Fetching silent video...</p></div>';
+    box.innerHTML = `
+        <div class="dl-loading"><div class="spinner"></div><p>Trying direct API...</p>
+        <small style="color:var(--text-muted)">If spinner >3s, use fallback below</small></div>
+        <div id="noaudioFallback" style="display:none;margin-top:1rem">
+            <div class="dl-error">
+                <i class="fas fa-info-circle" style="color:#ff9800"></i>
+                <p><strong>Direct API blocked by YouTube</strong> (datacenter IP)</p>
+                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Use partner sites - they work 100%:</p>
+                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
+                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp4" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download MP4 via Loader.to</a>
+                    <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
+                </div>
+            </div>
+        </div>`;
     addDlBoxStyles();
+
+    const fallbackTimer = setTimeout(() => {
+        const fb = document.getElementById('noaudioFallback');
+        if (fb) fb.style.display = 'block';
+    }, 3000);
 
     try {
         const data = await getStreamsWithFallback(videoID);
-        // videoOnly streams
+        clearTimeout(fallbackTimer);
         let vids = (data.videoStreams || []).filter(v => v.videoOnly === true);
-        if (!vids.length) {
-            // fallback: show audio-less option message
-            vids = (data.videoStreams || []).slice(0,4);
-        }
+        if (!vids.length) vids = (data.videoStreams || []).slice(0,4);
         vids.sort((a,b) => (parseInt(b.quality)||0) - (parseInt(a.quality)||0));
         if (!vids.length) throw new Error('No streams');
 
@@ -465,7 +517,7 @@ async function downloadVideoNoAudio() {
             const ext = v.mimeType?.includes('webm') ? 'webm' : 'mp4';
             html += `
                 <div class="stream-row">
-                    <div class="stream-meta"><strong>${label}</strong> • ${ext} <small>${tag} ${formatBytes(v.contentLength)}</small></div>
+                    <div class="stream-meta"><strong>${label}</strong> • ${ext} <small>${v.videoOnly ? 'no audio' : 'with audio'} ${formatBytes(v.contentLength)}</small></div>
                     <div class="stream-actions">
                         <a href="${v.url}" download="yt-silent-${videoID}-${label}.${ext}" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download</a>
                         <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('${v.url}')"><i class="fas fa-copy"></i></button>
