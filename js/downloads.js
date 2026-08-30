@@ -220,27 +220,16 @@ function triggerDirectDeviceDownload(videoID, type, quality, filename, btnId) {
         btn.disabled = true;
     }
 
-    showToast('Download started! Saving directly to your device...', 'success');
-
-    // 1. Dedicated hidden download frame for silent direct download
-    let dlFrame = document.getElementById('directDownloadFrame');
-    if (!dlFrame) {
-        dlFrame = document.createElement('iframe');
-        dlFrame.id = 'directDownloadFrame';
-        dlFrame.style.display = 'none';
-        document.body.appendChild(dlFrame);
-    }
+    showToast('Download starting! Saving to Chrome downloads...', 'success');
 
     const downloadEndpoint = `/api/download?id=${encodeURIComponent(videoID)}&type=${encodeURIComponent(type)}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(filename)}`;
     
-    // Trigger download via hidden frame
-    dlFrame.src = downloadEndpoint;
-
-    // 2. Also trigger direct link download attribute
+    // 1. Direct anchor download trigger
     const a = document.createElement('a');
     a.href = downloadEndpoint;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
     a.download = filename;
-    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
     setTimeout(() => a.remove(), 2000);
@@ -250,7 +239,7 @@ function triggerDirectDeviceDownload(videoID, type, quality, filename, btnId) {
             btn.innerHTML = `<i class="fas fa-check-circle"></i> Downloaded! Click to Download Again`;
             btn.disabled = false;
         }
-    }, 4000);
+    }, 3500);
 }
 
 /* ---------- AUDIO DOWNLOADER (MP3) ---------- */
