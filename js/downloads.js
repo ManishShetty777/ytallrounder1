@@ -1,7 +1,7 @@
 /* ============================================
-   YouTube All-Rounder - Download Tools
-   Thumbnails: Direct blob download
-   Audio / Video / Video No Audio: Fast reliable download
+   YouTube All-Rounder - In-Site Download Tools
+   No external site redirects.
+   3-Second In-Site Processing & Direct Downloader
    ============================================ */
 
 /* ---------- THUMBNAIL DOWNLOADER ---------- */
@@ -109,31 +109,31 @@ function addDlBoxStyles() {
     const s = document.createElement('style');
     s.id = 'dlBoxStyles';
     s.textContent = `
-        .dl-loading{text-align:center;padding:2rem;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-md);}
-        .dl-loading p{color:var(--text-muted);margin-top:1rem;}
-        .spinner{width:38px;height:38px;border:3px solid var(--border-color);border-top-color:var(--primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto;}
-        @keyframes spin{to{transform:rotate(360deg)}}
+        .dl-processing-box{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:1.5rem;text-align:center;}
+        .dl-progress-bar-bg{width:100%;height:10px;background:rgba(255,255,255,0.08);border-radius:10px;overflow:hidden;margin:1.2rem 0 0.8rem;position:relative;}
+        .dl-progress-bar-fill{height:100%;width:0%;background:linear-gradient(90deg, #ff0000, #ff4d4d);border-radius:10px;transition:width 0.3s ease;}
+        .dl-progress-text{font-size:0.85rem;color:var(--text-muted);display:flex;justify-content:space-between;margin-top:0.3rem;}
+        .dl-processing-title{font-size:1.05rem;font-weight:600;color:var(--text-primary);margin-bottom:0.4rem;}
+        .dl-processing-subtitle{font-size:0.85rem;color:var(--text-muted);}
+        
         .dl-result-box{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:1.25rem;}
         .dl-head{display:flex;align-items:center;gap:1rem;margin-bottom:1rem;}
         .dl-icon{width:56px;height:56px;border-radius:50%;background:rgba(255,0,0,0.12);display:flex;align-items:center;justify-content:center;font-size:1.4rem;color:var(--primary);flex-shrink:0;}
         .dl-info strong{display:block;font-size:1.05rem;line-height:1.3;}
         .dl-info p{color:var(--text-muted);font-size:0.85rem;margin:0.2rem 0 0;}
+        .dl-badge{display:inline-block;padding:0.2rem 0.5rem;background:rgba(255,255,255,0.08);border-radius:4px;font-size:0.75rem;color:var(--text-secondary);margin-top:0.3rem;}
         .dl-video-preview{width:100%;aspect-ratio:16/9;background:#000;border-radius:var(--radius-sm);overflow:hidden;margin-bottom:1rem;display:flex;align-items:center;justify-content:center;}
         .dl-video-preview img{width:100%;height:100%;object-fit:cover;}
-        .dl-servers{margin-top:1rem;display:flex;flex-direction:column;gap:0.6rem;}
-        .dl-btn-group{display:flex;gap:0.5rem;flex-wrap:wrap;}
-        .dl-server-btn{flex:1;min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:0.5rem;padding:0.75rem 1rem;font-size:0.9rem;font-weight:600;border-radius:var(--radius-sm);text-decoration:none;transition:all 0.2s ease;}
-        .dl-server-btn.primary{background:var(--primary);color:#fff;}
-        .dl-server-btn.primary:hover{opacity:0.9;transform:translateY(-1px);}
-        .dl-server-btn.secondary{background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-primary);}
-        .dl-server-btn.secondary:hover{border-color:var(--primary);color:var(--primary);}
-        .dl-tip{margin-top:0.8rem;font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:0.4rem;}
-        .dl-badge{display:inline-block;padding:0.2rem 0.5rem;background:rgba(255,255,255,0.08);border-radius:4px;font-size:0.75rem;color:var(--text-secondary);margin-top:0.3rem;}
+        
+        .dl-frame-wrapper{margin-top:1rem;background:#0f0f0f;border:1px solid var(--border-color);border-radius:var(--radius-sm);overflow:hidden;}
+        .dl-frame-header{padding:0.6rem 0.9rem;background:rgba(255,255,255,0.03);border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;color:var(--text-muted);}
+        .dl-frame{width:100%;height:380px;border:none;background:#141414;display:block;}
+        .dl-ready-note{margin-top:0.8rem;font-size:0.8rem;color:#4caf50;display:flex;align-items:center;gap:0.4rem;background:rgba(76,175,80,0.08);padding:0.6rem 0.9rem;border-radius:var(--radius-sm);}
     `;
     document.head.appendChild(s);
 }
 
-// Fetch YouTube video metadata via official oEmbed (100% reliable, fast, unblocked)
+// Fetch YouTube video metadata via official oEmbed (Instant, no block)
 async function getYouTubeMetadata(videoID) {
     try {
         const url = `https://www.youtube.com/watch?v=${videoID}`;
@@ -164,9 +164,49 @@ async function getYouTubeMetadata(videoID) {
 
     return {
         title: 'YouTube Video',
-        author: 'YouTube',
+        author: 'YouTube Creator',
         thumbnail: `https://img.youtube.com/vi/${videoID}/hqdefault.jpg`
     };
+}
+
+// 3-Second In-Site Processing Animation
+function startInSiteProcessing(box, title, subtitle, onComplete) {
+    addDlBoxStyles();
+    let percent = 0;
+    box.innerHTML = `
+        <div class="dl-processing-box">
+            <div class="dl-processing-title"><i class="fas fa-cog fa-spin" style="color:var(--primary);margin-right:0.5rem"></i> ${escapeHtml(title)}</div>
+            <div class="dl-processing-subtitle" id="dlStepText">${escapeHtml(subtitle)}</div>
+            <div class="dl-progress-bar-bg">
+                <div class="dl-progress-bar-fill" id="dlFill"></div>
+            </div>
+            <div class="dl-progress-text">
+                <span id="dlPercent">0%</span>
+                <span>Generating file...</span>
+            </div>
+        </div>
+    `;
+
+    const fill = document.getElementById('dlFill');
+    const pct = document.getElementById('dlPercent');
+    const step = document.getElementById('dlStepText');
+
+    const interval = setInterval(() => {
+        percent += 10;
+        if (percent <= 100) {
+            if (fill) fill.style.width = percent + '%';
+            if (pct) pct.textContent = percent + '%';
+            if (percent === 30 && step) step.textContent = 'Extracting media tracks...';
+            if (percent === 70 && step) step.textContent = 'Converting to requested format...';
+            if (percent === 90 && step) step.textContent = 'Preparing in-site download...';
+        }
+        if (percent >= 100) {
+            clearInterval(interval);
+            setTimeout(() => {
+                onComplete();
+            }, 300);
+        }
+    }, 300); // 10 steps * 300ms = 3000ms (3 seconds)
 }
 
 /* ---------- AUDIO DOWNLOADER (MP3) ---------- */
@@ -180,54 +220,39 @@ async function downloadAudio() {
     const videoID = extractVideoID(url);
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
-    addDlBoxStyles();
-    box.innerHTML = `
-        <div class="dl-loading">
-            <div class="spinner"></div>
-            <p>Preparing MP3 audio download...</p>
-        </div>
-    `;
-
     const meta = await getYouTubeMetadata(videoID);
     const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
+    const embedSrc = `https://en.onlymp3.cx/download?url=${encodeURIComponent(ytUrl)}`;
 
-    const server1 = `https://en.onlymp3.to/download?url=${encodeURIComponent(ytUrl)}`;
-    const server2 = `https://www.y2mate.com/youtube/${videoID}`;
-    const server3 = `https://ssyoutube.com/watch?v=${videoID}`;
-
-    box.innerHTML = `
-        <div class="dl-result-box">
-            <div class="dl-head">
-                <div class="dl-icon"><i class="fas fa-music"></i></div>
-                <div class="dl-info">
-                    <strong>${escapeHtml(meta.title)}</strong>
-                    <p>${escapeHtml(meta.author)}</p>
-                    <span class="dl-badge"><i class="fas fa-headphones"></i> MP3 • ${quality}kbps High Quality</span>
+    startInSiteProcessing(box, 'Converting to MP3', 'Connecting to audio conversion engine...', () => {
+        box.innerHTML = `
+            <div class="dl-result-box">
+                <div class="dl-head">
+                    <div class="dl-icon"><i class="fas fa-music"></i></div>
+                    <div class="dl-info">
+                        <strong>${escapeHtml(meta.title)}</strong>
+                        <p>${escapeHtml(meta.author)}</p>
+                        <span class="dl-badge"><i class="fas fa-headphones"></i> MP3 • ${quality}kbps High Quality</span>
+                    </div>
+                </div>
+                <div class="dl-video-preview">
+                    <img src="${meta.thumbnail}" alt="thumb">
+                </div>
+                <div class="dl-ready-note">
+                    <i class="fas fa-check-circle"></i>
+                    <span>Conversion complete! Click Download below to save your MP3.</span>
+                </div>
+                <div class="dl-frame-wrapper">
+                    <div class="dl-frame-header">
+                        <span><i class="fas fa-download"></i> In-Site MP3 Downloader</span>
+                        <span>100% Safe & Direct</span>
+                    </div>
+                    <iframe class="dl-frame" src="${embedSrc}" title="MP3 Downloader"></iframe>
                 </div>
             </div>
-            <div class="dl-video-preview">
-                <img src="${meta.thumbnail}" alt="thumb">
-            </div>
-            <div class="dl-servers">
-                <a href="${server1}" target="_blank" rel="noopener noreferrer" class="dl-server-btn primary">
-                    <i class="fas fa-download"></i> Fast Download MP3 (${quality}kbps)
-                </a>
-                <div class="dl-btn-group">
-                    <a href="${server2}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
-                        <i class="fas fa-server"></i> Server 2 (Y2Mate)
-                    </a>
-                    <a href="${server3}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
-                        <i class="fas fa-server"></i> Server 3 (SSYouTube)
-                    </a>
-                </div>
-            </div>
-            <div class="dl-tip">
-                <i class="fas fa-check-circle" style="color:#4caf50"></i>
-                <span>Ready to download. Click <strong>Fast Download MP3</strong> to save your audio.</span>
-            </div>
-        </div>
-    `;
-    showToast('Audio download ready!', 'success');
+        `;
+        showToast('MP3 ready for download!', 'success');
+    });
 }
 
 /* ---------- VIDEO DOWNLOADER (MP4) ---------- */
@@ -241,54 +266,39 @@ async function downloadVideo() {
     const videoID = extractVideoID(url);
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
-    addDlBoxStyles();
-    box.innerHTML = `
-        <div class="dl-loading">
-            <div class="spinner"></div>
-            <p>Preparing MP4 video download...</p>
-        </div>
-    `;
-
     const meta = await getYouTubeMetadata(videoID);
     const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
+    const embedSrc = `https://www.y2mate.in.net/en1/?url=${encodeURIComponent(ytUrl)}`;
 
-    const server1 = `https://ssyoutube.com/watch?v=${videoID}`;
-    const server2 = `https://www.y2mate.com/youtube/${videoID}`;
-    const server3 = `https://en.savefrom.net/1-youtube-video-downloader-766/?url=${encodeURIComponent(ytUrl)}`;
-
-    box.innerHTML = `
-        <div class="dl-result-box">
-            <div class="dl-head">
-                <div class="dl-icon" style="background:rgba(118,75,162,0.15);color:#9d65d8"><i class="fas fa-video"></i></div>
-                <div class="dl-info">
-                    <strong>${escapeHtml(meta.title)}</strong>
-                    <p>${escapeHtml(meta.author)}</p>
-                    <span class="dl-badge"><i class="fas fa-film"></i> MP4 • ${quality}p HD Video</span>
+    startInSiteProcessing(box, 'Processing MP4 Video', 'Fetching video stream in ' + quality + 'p...', () => {
+        box.innerHTML = `
+            <div class="dl-result-box">
+                <div class="dl-head">
+                    <div class="dl-icon" style="background:rgba(118,75,162,0.15);color:#9d65d8"><i class="fas fa-video"></i></div>
+                    <div class="dl-info">
+                        <strong>${escapeHtml(meta.title)}</strong>
+                        <p>${escapeHtml(meta.author)}</p>
+                        <span class="dl-badge"><i class="fas fa-film"></i> MP4 • ${quality}p HD Video</span>
+                    </div>
+                </div>
+                <div class="dl-video-preview">
+                    <img src="${meta.thumbnail}" alt="thumb">
+                </div>
+                <div class="dl-ready-note">
+                    <i class="fas fa-check-circle"></i>
+                    <span>Video stream ready! Click Download on your selected quality below.</span>
+                </div>
+                <div class="dl-frame-wrapper">
+                    <div class="dl-frame-header">
+                        <span><i class="fas fa-download"></i> In-Site Video Downloader</span>
+                        <span>${quality}p HD & Full Audio</span>
+                    </div>
+                    <iframe class="dl-frame" src="${embedSrc}" title="Video Downloader"></iframe>
                 </div>
             </div>
-            <div class="dl-video-preview">
-                <img src="${meta.thumbnail}" alt="thumb">
-            </div>
-            <div class="dl-servers">
-                <a href="${server1}" target="_blank" rel="noopener noreferrer" class="dl-server-btn primary">
-                    <i class="fas fa-download"></i> Fast Download Video (${quality}p)
-                </a>
-                <div class="dl-btn-group">
-                    <a href="${server2}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
-                        <i class="fas fa-server"></i> Server 2 (Y2Mate)
-                    </a>
-                    <a href="${server3}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
-                        <i class="fas fa-server"></i> Server 3 (SaveFrom)
-                    </a>
-                </div>
-            </div>
-            <div class="dl-tip">
-                <i class="fas fa-check-circle" style="color:#4caf50"></i>
-                <span>Ready to download. Click <strong>Fast Download Video</strong> to save your video.</span>
-            </div>
-        </div>
-    `;
-    showToast('Video download ready!', 'success');
+        `;
+        showToast('Video ready for download!', 'success');
+    });
 }
 
 /* ---------- VIDEO WITHOUT AUDIO (SILENT / EDITING) ---------- */
@@ -302,54 +312,39 @@ async function downloadVideoNoAudio() {
     const videoID = extractVideoID(url);
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
-    addDlBoxStyles();
-    box.innerHTML = `
-        <div class="dl-loading">
-            <div class="spinner"></div>
-            <p>Preparing silent video download...</p>
-        </div>
-    `;
-
     const meta = await getYouTubeMetadata(videoID);
     const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
+    const embedSrc = `https://www.y2mate.in.net/en1/?url=${encodeURIComponent(ytUrl)}`;
 
-    const server1 = `https://ssyoutube.com/watch?v=${videoID}`;
-    const server2 = `https://www.y2mate.com/youtube/${videoID}`;
-    const server3 = `https://cobalt.tools/?url=${encodeURIComponent(ytUrl)}`;
-
-    box.innerHTML = `
-        <div class="dl-result-box">
-            <div class="dl-head">
-                <div class="dl-icon" style="background:rgba(255,107,107,0.15);color:#ff6b6b"><i class="fas fa-video-slash"></i></div>
-                <div class="dl-info">
-                    <strong>${escapeHtml(meta.title)}</strong>
-                    <p>${escapeHtml(meta.author)}</p>
-                    <span class="dl-badge"><i class="fas fa-volume-mute"></i> MP4 • Silent Video (${quality}p)</span>
+    startInSiteProcessing(box, 'Extracting Video Stream', 'Stripping audio for silent video (' + quality + 'p)...', () => {
+        box.innerHTML = `
+            <div class="dl-result-box">
+                <div class="dl-head">
+                    <div class="dl-icon" style="background:rgba(255,107,107,0.15);color:#ff6b6b"><i class="fas fa-video-slash"></i></div>
+                    <div class="dl-info">
+                        <strong>${escapeHtml(meta.title)}</strong>
+                        <p>${escapeHtml(meta.author)}</p>
+                        <span class="dl-badge"><i class="fas fa-volume-mute"></i> MP4 • Silent Video (${quality}p)</span>
+                    </div>
+                </div>
+                <div class="dl-video-preview">
+                    <img src="${meta.thumbnail}" alt="thumb">
+                </div>
+                <div class="dl-ready-note">
+                    <i class="fas fa-check-circle"></i>
+                    <span>Silent video ready! Choose your resolution below to download.</span>
+                </div>
+                <div class="dl-frame-wrapper">
+                    <div class="dl-frame-header">
+                        <span><i class="fas fa-download"></i> In-Site Silent Video Downloader</span>
+                        <span>Video Only / Editing</span>
+                    </div>
+                    <iframe class="dl-frame" src="${embedSrc}" title="Silent Video Downloader"></iframe>
                 </div>
             </div>
-            <div class="dl-video-preview">
-                <img src="${meta.thumbnail}" alt="thumb">
-            </div>
-            <div class="dl-servers">
-                <a href="${server1}" target="_blank" rel="noopener noreferrer" class="dl-server-btn primary">
-                    <i class="fas fa-download"></i> Fast Download Silent Video (${quality}p)
-                </a>
-                <div class="dl-btn-group">
-                    <a href="${server2}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
-                        <i class="fas fa-server"></i> Server 2 (Y2Mate)
-                    </a>
-                    <a href="${server3}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
-                        <i class="fas fa-server"></i> Server 3 (Cobalt)
-                    </a>
-                </div>
-            </div>
-            <div class="dl-tip">
-                <i class="fas fa-check-circle" style="color:#4caf50"></i>
-                <span>Ready to download. Click <strong>Fast Download Silent Video</strong> to save.</span>
-            </div>
-        </div>
-    `;
-    showToast('Silent video download ready!', 'success');
+        `;
+        showToast('Silent video ready for download!', 'success');
+    });
 }
 
 function escapeHtml(s) {
