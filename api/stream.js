@@ -67,10 +67,12 @@ module.exports = async (req, res) => {
     if (parsedCookies) {
       try {
         agent = ytdl.createAgent(parsedCookies);
-        console.log(`[API /stream] Tier 1: Initialized agent with ${parsedCookies.length} session cookies`);
+        console.log(`[API /stream] Tier 1: Agent initialized with ${parsedCookies.length} session cookies`);
       } catch (agentErr) {
         console.warn('[API /stream] Tier 1 agent creation error:', agentErr.message);
       }
+    } else {
+      console.warn('[API /stream] YOUTUBE_COOKIE is unset in environment variables; running anonymous Tier 1 request');
     }
 
     const info = await ytdl.getInfo(ytUrl, {
@@ -144,49 +146,66 @@ module.exports = async (req, res) => {
   }
 
   // ----------------------------------------------------
-  // TIER 3: Hosted Cobalt API Endpoint
+  // TIER 3: Hosted Cobalt API Endpoint (Env-Var Only)
   // ----------------------------------------------------
-  const cobaltBase = process.env.COBALT_API_URL || 'https://api.cobalt.tools';
-  try {
-    const cobaltHeaders = {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    };
-    if (process.env.COBALT_API_KEY) {
-      cobaltHeaders['Authorization'] = `Bearer ${process.env.COBALT_API_KEY}`;
-    }
-
-    const cobaltRes = await fetch(cobaltBase, {
-      method: 'POST',
-      headers: cobaltHeaders,
-      body: JSON.stringify({
-        url: ytUrl,
-        downloadMode: type === 'audio' ? 'audio' : 'auto',
-        audioFormat: 'mp3',
-        videoQuality: quality === '1080' ? '1080' : quality === '720' ? '720' : 'auto'
-      }),
-      signal: AbortSignal.timeout(8000)
-    });
-
-    if (cobaltRes.ok) {
-      const cobaltData = await cobaltRes.json();
-      if (cobaltData.url || cobaltData.status === 'redirect' || cobaltData.status === 'tunnel') {
-        console.log('[API /stream] Tier 3 SUCCESS: Cobalt resolved media URL');
-        return res.status(200).json({
-          success: true,
-          title: cobaltData.filename || 'YouTube Download',
-          author: 'YouTube Creator',
-          format: {
-            quality: quality + (type === 'audio' ? 'kbps' : 'p')
-          },
-          provider: 'cobalt-api'
-        });
+  const cobaltBase = process.env.COBALT_API_URL || null;
+  if (!cobaltBase) {
+    console.warn('[API /stream] COBALT_API_URL is unset; Tier 3 (hosted Cobalt service) is disabled.');
+  } else {
+    try {
+      const cobaltHeaders = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      };
+      if (process.env.COBALT_API_KEY) {
+        cobaltHeaders['Authorization'] = `Api-Key ${process.env.COBALT_API_KEY}`;
       }
+
+      const cobaltRes = await fetch(cobaltBase, {
+        method: 'POST',
+        headers: cobaltHeaders,
+        body: JSON.stringify({
+          url: ytUrl,
+          downloadMode: type === 'audio' ? 'audio' : 'auto',
+          audioFormat: 'mp3',
+          videoQuality: quality === '1080' ? '1080' : quality === '720' ? '720' : 'auto'
+        }),
+        signal: AbortSignal.timeout(8000)
+      });
+
+      if (cobaltRes.ok) {
+        const cobaltData = await cobaltRes.json();
+        let mediaUrl = null;
+        if (cobaltData.url) {
+          mediaUrl = cobaltData.url;
+        } else if (cobaltData.tunnel) {
+          mediaUrl = Array.isArray(cobaltData.tunnel) ? cobaltData.tunnel[0] : cobaltData.tunnel;
+        } else if (cobaltData.output?.url) {
+          mediaUrl = cobaltData.output.url;
+        } else if (typeof cobaltData.output === 'string') {
+          mediaUrl = cobaltData.output;
+        } else if (cobaltData.picker && Array.isArray(cobaltData.picker) && cobaltData.picker[0]?.url) {
+          mediaUrl = cobaltData.picker[0].url;
+        }
+
+        if (mediaUrl || cobaltData.status === 'redirect' || cobaltData.status === 'tunnel') {
+          console.log('[API /stream] Tier 3 SUCCESS: Cobalt resolved media URL');
+          return res.status(200).json({
+            success: true,
+            title: cobaltData.filename || 'YouTube Download',
+            author: 'YouTube Creator',
+            format: {
+              quality: quality + (type === 'audio' ? 'kbps' : 'p')
+            },
+            provider: 'cobalt-api'
+          });
+        }
+      }
+    } catch (t3Err) {
+      lastError = t3Err;
+      console.warn('[API /stream] Tier 3 (Cobalt) failed:', t3Err.message);
     }
-  } catch (t3Err) {
-    lastError = t3Err;
-    console.warn('[API /stream] Tier 3 (Cobalt) failed:', t3Err.message);
   }
 
   // ----------------------------------------------------

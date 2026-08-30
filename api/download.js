@@ -1,5 +1,5 @@
 // Vercel Serverless Function - Production Media Streaming & Download Endpoint
-// Multi-Tier Stream Pipeline: Authenticated YTDL -> YouTubei.js (TV Client) -> Cobalt Proxy
+// Multi-Tier Stream Pipeline: Authenticated YTDL -> Hosted Cobalt API (if configured)
 
 const https = require('https');
 const http = require('http');
@@ -53,7 +53,7 @@ function streamRemoteUrl(targetUrl, res, filename, mimeType, maxRedirects = 5) {
     if (response.statusCode >= 400) {
       response.resume();
       if (!res.headersSent) {
-        return res.status(response.statusCode).json({ error: `Upstream media returned ${response.statusCode}` });
+        return res.status(response.statusCode).json({ error: `Upstream media returned HTTP ${response.statusCode}` });
       }
       return;
     }
@@ -70,7 +70,7 @@ function streamRemoteUrl(targetUrl, res, filename, mimeType, maxRedirects = 5) {
   });
 
   req.on('error', (e) => {
-    if (!res.headersSent) res.status(500).json({ error: e.message });
+    if (!res.headersSent) res.status(500).json({ error: 'Upstream stream error: ' + e.message });
   });
 }
 
@@ -88,7 +88,7 @@ module.exports = async (req, res) => {
   const rawTitle = req.query.title || 'YouTube_Download';
 
   if (!videoID || videoID.length !== 11) {
-    return res.status(400).json({ error: 'Invalid Video ID', code: 400 });
+    return res.status(400).json({ error: 'Invalid YouTube Video ID. Must be 11 characters.', code: 400 });
   }
 
   const cleanTitle = rawTitle.replace(/[^\w\s.-]/gi, '').trim().replace(/\s+/g, '_').substring(0, 80) || `media_${videoID}`;
@@ -112,7 +112,12 @@ module.exports = async (req, res) => {
     if (parsedCookies) {
       try {
         agent = ytdl.createAgent(parsedCookies);
-      } catch (agentErr) {}
+        console.log(`[API /download] Tier 1: Agent created with ${parsedCookies.length} session cookies`);
+      } catch (agentErr) {
+        console.warn('[API /download] Tier 1 agent error:', agentErr.message);
+      }
+    } else {
+      console.warn('[API /download] YOUTUBE_COOKIE is unset in environment variables; running anonymous Tier 1 request');
     }
 
     const filter = type === 'audio' ? 'audioonly' : type === 'videoonly' ? 'videoonly' : 'audioandvideo';
@@ -148,49 +153,71 @@ module.exports = async (req, res) => {
     }
   } catch (t1Err) {
     lastError = t1Err;
-    console.warn('[API /download] Tier 1 failed:', t1Err.message);
+    console.warn('[API /download] Tier 1 (ytdl-core) failed:', t1Err.message);
   }
 
   // ----------------------------------------------------
-  // TIER 2: Hosted Cobalt API Pipe
+  // TIER 2: Hosted Cobalt API Pipe (Env-Var Only)
   // ----------------------------------------------------
-  const cobaltBase = process.env.COBALT_API_URL || 'https://api.cobalt.tools';
-  try {
-    const cobaltHeaders = {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0'
-    };
-    if (process.env.COBALT_API_KEY) {
-      cobaltHeaders['Authorization'] = `Bearer ${process.env.COBALT_API_KEY}`;
-    }
+  const cobaltBase = process.env.COBALT_API_URL || null;
 
-    const cobaltRes = await fetch(cobaltBase, {
-      method: 'POST',
-      headers: cobaltHeaders,
-      body: JSON.stringify({
-        url: ytUrl,
-        downloadMode: type === 'audio' ? 'audio' : 'auto',
-        audioFormat: 'mp3',
-        videoQuality: quality === '1080' ? '1080' : '720'
-      }),
-      signal: AbortSignal.timeout(10000)
-    });
+  if (!cobaltBase) {
+    console.warn('[API /download] COBALT_API_URL is unset; Tier 2 (hosted Cobalt service) is disabled.');
+  } else {
+    try {
+      const cobaltHeaders = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      };
 
-    if (cobaltRes.ok) {
-      const cobaltData = await cobaltRes.json();
-      if (cobaltData.url) {
-        console.log('[API /download] Streaming via Cobalt direct URL');
-        return streamRemoteUrl(cobaltData.url, res, filename, mimeType);
+      // Api-Key scheme per Cobalt specification
+      if (process.env.COBALT_API_KEY) {
+        cobaltHeaders['Authorization'] = `Api-Key ${process.env.COBALT_API_KEY}`;
       }
+
+      const cobaltRes = await fetch(cobaltBase, {
+        method: 'POST',
+        headers: cobaltHeaders,
+        body: JSON.stringify({
+          url: ytUrl,
+          downloadMode: type === 'audio' ? 'audio' : 'auto',
+          audioFormat: 'mp3',
+          videoQuality: quality === '1080' ? '1080' : quality === '720' ? '720' : 'auto'
+        }),
+        signal: AbortSignal.timeout(10000)
+      });
+
+      if (cobaltRes.ok) {
+        const cobaltData = await cobaltRes.json();
+        
+        // Handle all Cobalt response formats: url, tunnel, output, picker (local-processing)
+        let mediaUrl = null;
+        if (cobaltData.url) {
+          mediaUrl = cobaltData.url;
+        } else if (cobaltData.tunnel) {
+          mediaUrl = Array.isArray(cobaltData.tunnel) ? cobaltData.tunnel[0] : cobaltData.tunnel;
+        } else if (cobaltData.output?.url) {
+          mediaUrl = cobaltData.output.url;
+        } else if (typeof cobaltData.output === 'string') {
+          mediaUrl = cobaltData.output;
+        } else if (cobaltData.picker && Array.isArray(cobaltData.picker) && cobaltData.picker[0]?.url) {
+          mediaUrl = cobaltData.picker[0].url;
+        }
+
+        if (mediaUrl) {
+          console.log('[API /download] Streaming via Cobalt direct media URL');
+          return streamRemoteUrl(mediaUrl, res, filename, mimeType);
+        }
+      }
+    } catch (t2Err) {
+      lastError = t2Err;
+      console.warn('[API /download] Tier 2 (Cobalt) failed:', t2Err.message);
     }
-  } catch (t2Err) {
-    lastError = t2Err;
-    console.warn('[API /download] Tier 2 failed:', t2Err.message);
   }
 
   // ----------------------------------------------------
-  // Error Response
+  // Error Response (Surface True Underlying Reason)
   // ----------------------------------------------------
   const errMsg = lastError?.message || 'Download streaming failed';
   let statusCode = 503;
@@ -201,10 +228,10 @@ module.exports = async (req, res) => {
     userFriendlyError = 'YouTube bot protection temporarily blocked this datacenter request. Set YOUTUBE_COOKIE in Vercel environment variables to enable 100% continuous extraction.';
   } else if (errMsg.includes('404') || errMsg.includes('Video unavailable')) {
     statusCode = 404;
-    userFriendlyError = 'This video is unavailable or has been deleted.';
+    userFriendlyError = 'This video is unavailable or has been deleted from YouTube.';
   } else if (errMsg.includes('403') || errMsg.includes('private video')) {
     statusCode = 403;
-    userFriendlyError = 'This video is private or age-restricted.';
+    userFriendlyError = 'This video is private, age-restricted, or region-restricted.';
   }
 
   if (!res.headersSent) {
