@@ -1,5 +1,7 @@
-// Vercel Serverless Function - Direct YouTube Download Endpoint
-// Directs browser to stream the media file directly into Chrome Downloads
+// Vercel Serverless Function - Direct Binary Download Streamer
+// Pipes media stream directly to user's browser as attachment
+
+const ytdl = require('@distube/ytdl-core');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -20,23 +22,37 @@ module.exports = async (req, res) => {
   const filename = cleanTitle.endsWith(`.${ext}`) ? cleanTitle : `${cleanTitle}.${ext}`;
 
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+  res.setHeader('Content-Type', type === 'audio' ? 'audio/mpeg' : 'video/mp4');
 
-  const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
+  const url = `https://www.youtube.com/watch?v=${videoID}`;
 
-  // Direct fast download CDN endpoints based on media type
-  let downloadUrl = '';
+  try {
+    const filter = type === 'audio' ? 'audioonly' : type === 'videoonly' ? 'videoonly' : 'audioandvideo';
+    const qualityOpt = type === 'audio' ? 'highestaudio' : 'highest';
 
-  if (type === 'audio') {
-    // Dedicated MP3 audio download sources
-    downloadUrl = `https://en.onlymp3.to/download?url=${encodeURIComponent(ytUrl)}`;
-  } else if (type === 'videoonly') {
-    // Silent video source
-    downloadUrl = `https://ssyoutube.com/watch?v=${videoID}`;
-  } else {
-    // Full HD Video MP4 source
-    downloadUrl = `https://ssyoutube.com/watch?v=${videoID}`;
+    const stream = ytdl(url, {
+      filter,
+      quality: qualityOpt,
+      requestOptions: {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      }
+    });
+
+    stream.on('error', (err) => {
+      console.error('YTDL stream error:', err.message);
+      if (!res.headersSent) {
+        // Fallback: Send a structured response or redirect to stream endpoint
+        return res.status(502).json({ error: 'Stream failed', message: err.message });
+      }
+    });
+
+    stream.pipe(res);
+  } catch (err) {
+    console.error('Handler error:', err.message);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: 'Download failed: ' + err.message });
+    }
   }
-
-  // Redirect browser directly to the media stream endpoint to trigger download
-  return res.redirect(302, downloadUrl);
 };

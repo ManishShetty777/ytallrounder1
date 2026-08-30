@@ -1,7 +1,7 @@
 /* ============================================
    YouTube All-Rounder - Direct Download Tools
-   Direct-to-Device Chrome Downloads
-   Zero Page Redirects, In-Site 3-Second Processing
+   100% In-Site Blob & Device Downloads
+   Zero External Redirects, Real-Time Chrome Saving
    ============================================ */
 
 /* ---------- THUMBNAIL DOWNLOADER ---------- */
@@ -76,7 +76,7 @@ async function downloadThumbBlob(url, filename) {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
-        showToast('Thumbnail downloaded!', 'success');
+        showToast('Thumbnail downloaded directly to device!', 'success');
         if (status) status.textContent = 'Downloaded';
     } catch (err) {
         console.error(err);
@@ -128,6 +128,7 @@ function addDlBoxStyles() {
         .dl-download-actions{margin-top:1.2rem;display:flex;flex-direction:column;gap:0.75rem;}
         .dl-btn-main{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:0.6rem;padding:0.95rem 1.2rem;font-size:1rem;font-weight:700;border-radius:var(--radius-sm);background:var(--primary);color:#fff;border:none;cursor:pointer;transition:all 0.25s ease;}
         .dl-btn-main:hover{background:#cc0000;transform:translateY(-2px);box-shadow:0 6px 16px rgba(255,0,0,0.3);}
+        .dl-btn-main:disabled{opacity:0.7;cursor:not-allowed;transform:none;}
         .dl-servers-grid{display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;}
         .dl-btn-server{display:inline-flex;align-items:center;justify-content:center;gap:0.4rem;padding:0.65rem 0.8rem;font-size:0.85rem;font-weight:600;border-radius:var(--radius-sm);background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-primary);cursor:pointer;transition:all 0.2s ease;}
         .dl-btn-server:hover{border-color:var(--primary);color:var(--primary);}
@@ -185,7 +186,7 @@ function startInSiteProcessing(box, title, subtitle, onComplete) {
             </div>
             <div class="dl-progress-text">
                 <span id="dlPercent">0%</span>
-                <span>Converting file...</span>
+                <span>Processing media...</span>
             </div>
         </div>
     `;
@@ -201,7 +202,7 @@ function startInSiteProcessing(box, title, subtitle, onComplete) {
             if (pct) pct.textContent = percent + '%';
             if (percent === 30 && step) step.textContent = 'Extracting media tracks...';
             if (percent === 70 && step) step.textContent = 'Converting to requested format...';
-            if (percent === 90 && step) step.textContent = 'Finalizing file download...';
+            if (percent === 90 && step) step.textContent = 'Preparing direct device download...';
         }
         if (percent >= 100) {
             clearInterval(interval);
@@ -212,34 +213,55 @@ function startInSiteProcessing(box, title, subtitle, onComplete) {
     }, 300); // 10 steps * 300ms = 3000ms (3 seconds)
 }
 
-// Direct File Download Trigger (Downloads directly into Chrome/Browser without opening new page)
-function triggerDirectDeviceDownload(videoID, type, quality, filename, btnId) {
+// Direct In-Site File Downloader (Fetches binary Blob and triggers native Chrome save)
+async function downloadDirectBlobFile(videoID, type, quality, filename, btnId) {
     const btn = document.getElementById(btnId);
     if (btn) {
         btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Downloading to Device...`;
         btn.disabled = true;
     }
 
-    showToast('Download starting! Saving to Chrome downloads...', 'success');
+    showToast('Starting download... Please wait a moment.', 'info');
 
-    const downloadEndpoint = `/api/download?id=${encodeURIComponent(videoID)}&type=${encodeURIComponent(type)}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(filename)}`;
-    
-    // 1. Direct anchor download trigger
-    const a = document.createElement('a');
-    a.href = downloadEndpoint;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => a.remove(), 2000);
+    const endpoint = `/api/download?id=${encodeURIComponent(videoID)}&type=${encodeURIComponent(type)}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(filename)}`;
 
-    setTimeout(() => {
+    try {
+        const res = await fetch(endpoint);
+        if (!res.ok) throw new Error('Download endpoint returned ' + res.status);
+        
+        const blob = await res.blob();
+        if (!blob || blob.size < 100) throw new Error('Empty file received');
+
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+
+        showToast('Download complete! Saved directly to your device.', 'success');
         if (btn) {
             btn.innerHTML = `<i class="fas fa-check-circle"></i> Downloaded! Click to Download Again`;
             btn.disabled = false;
         }
-    }, 3500);
+    } catch (err) {
+        console.warn('Blob download fallback, triggering native direct stream:', err.message);
+        // Fallback: Trigger direct anchor download without navigating page
+        const a = document.createElement('a');
+        a.href = endpoint;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        showToast('Download request sent to browser!', 'success');
+        if (btn) {
+            btn.innerHTML = `<i class="fas fa-check-circle"></i> Download Started! Click to Retry`;
+            btn.disabled = false;
+        }
+    }
 }
 
 /* ---------- AUDIO DOWNLOADER (MP3) ---------- */
@@ -273,18 +295,18 @@ async function downloadAudio() {
                 </div>
                 <div class="dl-ready-note">
                     <i class="fas fa-check-circle"></i>
-                    <span>Audio conversion completed! Click below to save file to your device.</span>
+                    <span>Audio ready! Click Download below to save file to your device.</span>
                 </div>
                 <div class="dl-download-actions">
-                    <button id="mainAudioDlBtn" class="dl-btn-main" onclick="triggerDirectDeviceDownload('${videoID}', 'audio', '${quality}', '${escapeHtml(filename)}', 'mainAudioDlBtn')">
+                    <button id="mainAudioDlBtn" class="dl-btn-main" onclick="downloadDirectBlobFile('${videoID}', 'audio', '${quality}', '${escapeHtml(filename)}', 'mainAudioDlBtn')">
                         <i class="fas fa-download"></i> Download MP3 (${quality}kbps)
                     </button>
                     <div class="dl-servers-grid">
-                        <button id="server2AudioBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'audio', '192', '${escapeHtml(filename)}', 'server2AudioBtn')">
-                            <i class="fas fa-bolt"></i> High-Speed Server 2
+                        <button id="server2AudioBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'audio', '192', '${escapeHtml(filename)}', 'server2AudioBtn')">
+                            <i class="fas fa-bolt"></i> Fast Server 2
                         </button>
-                        <button id="server3AudioBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'audio', '128', '${escapeHtml(filename)}', 'server3AudioBtn')">
-                            <i class="fas fa-server"></i> High-Speed Server 3
+                        <button id="server3AudioBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'audio', '128', '${escapeHtml(filename)}', 'server3AudioBtn')">
+                            <i class="fas fa-server"></i> Fast Server 3
                         </button>
                     </div>
                 </div>
@@ -325,18 +347,18 @@ async function downloadVideo() {
                 </div>
                 <div class="dl-ready-note">
                     <i class="fas fa-check-circle"></i>
-                    <span>Video ready! Click below to save file to your device.</span>
+                    <span>Video ready! Click Download below to save file to your device.</span>
                 </div>
                 <div class="dl-download-actions">
-                    <button id="mainVideoDlBtn" class="dl-btn-main" onclick="triggerDirectDeviceDownload('${videoID}', 'video', '${quality}', '${escapeHtml(filename)}', 'mainVideoDlBtn')">
+                    <button id="mainVideoDlBtn" class="dl-btn-main" onclick="downloadDirectBlobFile('${videoID}', 'video', '${quality}', '${escapeHtml(filename)}', 'mainVideoDlBtn')">
                         <i class="fas fa-download"></i> Download Video (${quality}p HD)
                     </button>
                     <div class="dl-servers-grid">
-                        <button id="server2VideoBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'video', '720', '${escapeHtml(filename)}', 'server2VideoBtn')">
-                            <i class="fas fa-bolt"></i> High-Speed Server 2
+                        <button id="server2VideoBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'video', '720', '${escapeHtml(filename)}', 'server2VideoBtn')">
+                            <i class="fas fa-bolt"></i> Fast Server 2
                         </button>
-                        <button id="server3VideoBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'video', '480', '${escapeHtml(filename)}', 'server3VideoBtn')">
-                            <i class="fas fa-server"></i> High-Speed Server 3
+                        <button id="server3VideoBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'video', '480', '${escapeHtml(filename)}', 'server3VideoBtn')">
+                            <i class="fas fa-server"></i> Fast Server 3
                         </button>
                     </div>
                 </div>
@@ -377,18 +399,18 @@ async function downloadVideoNoAudio() {
                 </div>
                 <div class="dl-ready-note">
                     <i class="fas fa-check-circle"></i>
-                    <span>Silent video stream ready! Click below to save file to your device.</span>
+                    <span>Silent video ready! Click Download below to save file to your device.</span>
                 </div>
                 <div class="dl-download-actions">
-                    <button id="mainSilentDlBtn" class="dl-btn-main" onclick="triggerDirectDeviceDownload('${videoID}', 'videoonly', '${quality}', '${escapeHtml(filename)}', 'mainSilentDlBtn')">
+                    <button id="mainSilentDlBtn" class="dl-btn-main" onclick="downloadDirectBlobFile('${videoID}', 'videoonly', '${quality}', '${escapeHtml(filename)}', 'mainSilentDlBtn')">
                         <i class="fas fa-download"></i> Download Silent Video (${quality}p)
                     </button>
                     <div class="dl-servers-grid">
-                        <button id="server2SilentBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'videoonly', '720', '${escapeHtml(filename)}', 'server2SilentBtn')">
-                            <i class="fas fa-bolt"></i> High-Speed Server 2
+                        <button id="server2SilentBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'videoonly', '720', '${escapeHtml(filename)}', 'server2SilentBtn')">
+                            <i class="fas fa-bolt"></i> Fast Server 2
                         </button>
-                        <button id="server3SilentBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'videoonly', '480', '${escapeHtml(filename)}', 'server3SilentBtn')">
-                            <i class="fas fa-server"></i> High-Speed Server 3
+                        <button id="server3SilentBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'videoonly', '480', '${escapeHtml(filename)}', 'server3SilentBtn')">
+                            <i class="fas fa-server"></i> Fast Server 3
                         </button>
                     </div>
                 </div>
