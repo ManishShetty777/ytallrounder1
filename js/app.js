@@ -305,18 +305,20 @@ async function analyzeChannel() {
     // Helper to parse channel input
     function parseChannelIdOrHandle(input) {
         // channel ID
-        const idMatch = input.match(/channel\/(UC[\w-]{21,24})/);
+        const idMatch = input.match(/channel\/(UC[\w-]{20,24})/);
         if (idMatch) return { type: 'id', value: idMatch[1] };
+        if (input.startsWith('UC') && input.length >= 20) return { type: 'id', value: input };
         // handle
         const handleMatch = input.match(/@([\w\.\-]+)/);
         if (handleMatch) return { type: 'handle', value: '@' + handleMatch[1] };
         // c/ or user/
-        const customMatch = input.match(/(?:youtube\.com\/c\/|youtube\.com\/user\/)([^\/\s]+)/);
+        const customMatch = input.match(/(?:youtube\.com\/(?:c\/|user\/))([^\/\s\?]+)/);
         if (customMatch) return { type: 'handle', value: customMatch[1] };
-        // plain handle without @
-        if (input.startsWith('@')) return { type: 'handle', value: input.split('/')[0] };
-        // assume search term
-        return { type: 'search', value: input };
+        // plain handle with @
+        if (input.startsWith('@')) return { type: 'handle', value: input.split('/')[0].split('?')[0] };
+        // clean url
+        const cleanName = input.replace(/^https?:\/\/(?:www\.)?youtube\.com\/?/, '').replace(/\/$/, '');
+        return { type: 'handle', value: cleanName || input };
     }
 
     const PIPED_CHAN_INSTANCES = [
@@ -435,24 +437,6 @@ async function analyzeChannel() {
 
         // Real data from Piped - handle missing fields
         const channelName = data.name || data.uploader || data.author || parsed.value;
-        const subscribers = data.subscriberCount ?? data.subscribers ?? data.subCount ?? 0;
-        let totalViews = data.views ?? data.viewCount ?? data.totalViews ?? 0;
-        let videos = data.videos ?? data.videoCount ?? 0;
-        // Piped/Invidious may put videos in relatedStreams/latestVideos
-        const related = data.relatedStreams || data.latestVideos || [];
-        if (!videos && related.length) videos = related.length;
-        // If totalViews still 0, sum views from related/latests
-        if (!totalViews && related.length) {
-            totalViews = related.reduce((sum, v) => sum + (v.views || v.viewCount || 0), 0);
-            // if sum is 0, estimate: subs * 75
-            if (!totalViews) totalViews = subscribers * 75;
-        }
-        if (!totalViews && subscribers) totalViews = subscribers * 80;
-        const avatar = data.avatarUrl || data.thumbnailUrl || data.authorThumbnails?.[2]?.url || data.authorThumbnails?.[0]?.url || '';
-        const verified = data.verified || data.authorVerified || false;
-        const description = data.description || data.descriptionHtml || '';
-        const avgViews = videos ? Math.floor(totalViews / Math.max(videos,1)) : (subscribers ? Math.floor(totalViews / 100) : 0);
-        const engagement = subscribers && avgViews ? ((avgViews / Math.max(subscribers,1))*100).toFixed(2) : (subscribers ? '2.50' : '0.00');
         const subscribers = data.subscriberCount ?? data.subscribers ?? data.subCount ?? 0;
         let totalViews = data.views ?? data.viewCount ?? data.totalViews ?? 0;
         let videos = data.videos ?? data.videoCount ?? 0;
