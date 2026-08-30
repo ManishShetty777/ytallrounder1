@@ -1,7 +1,26 @@
 // Vercel Serverless Function - Production Media Stream & Extraction Prober
-// Multi-Tier Fallback Chain: Authenticated YTDL -> YouTubei.js (TV/Embedded) -> Hosted Cobalt API
+// Multi-Tier Fallback Chain: Authenticated YTDL -> YouTubei.js (TV/Embedded Dynamic ESM) -> Hosted Cobalt API
 
 const ytdl = require('@distube/ytdl-core');
+
+// Cache Innertube instance across warm serverless invocations
+let cachedInnertube = null;
+
+async function getInnertubeInstance() {
+  if (cachedInnertube) return cachedInnertube;
+  try {
+    const { Innertube, UniversalCache, ClientType } = await import('youtubei.js');
+    cachedInnertube = await Innertube.create({
+      cache: new UniversalCache(false),
+      client_type: ClientType.TV_EMBEDDED,
+      retrieve_player: true
+    });
+    return cachedInnertube;
+  } catch (err) {
+    console.warn('[API /stream] Dynamic import of youtubei.js failed:', err.message);
+    return null;
+  }
+}
 
 function parseCookies(cookieInput) {
   if (!cookieInput) return null;
@@ -109,36 +128,32 @@ module.exports = async (req, res) => {
   }
 
   // ----------------------------------------------------
-  // TIER 2: YouTube.js (InnerTube TV / Embedded Client Context)
+  // TIER 2: YouTube.js Dynamic ESM Import (TV Context & Warm Cache)
   // ----------------------------------------------------
   try {
-    const { Innertube, UniversalCache, ClientType } = require('youtubei.js');
-    const yt = await Innertube.create({
-      cache: new UniversalCache(false),
-      client_type: ClientType.TV_EMBEDDED,
-      retrieve_player: true
-    });
+    const yt = await getInnertubeInstance();
+    if (yt) {
+      const info = await yt.getInfo(videoID);
+      const formats = info.streaming_data?.adaptive_formats || [];
+      const targetFormat = type === 'audio'
+        ? formats.find(f => f.has_audio && !f.has_video)
+        : formats.find(f => f.has_video);
 
-    const info = await yt.getInfo(videoID);
-    const formats = info.streaming_data?.adaptive_formats || [];
-    const targetFormat = type === 'audio'
-      ? formats.find(f => f.has_audio && !f.has_video)
-      : formats.find(f => f.has_video);
-
-    if (targetFormat) {
-      console.log(`[API /stream] Tier 2 SUCCESS: YouTubei.js found format (itag: ${targetFormat.itag})`);
-      return res.status(200).json({
-        success: true,
-        title: info.basic_info?.title || 'YouTube Video',
-        author: info.basic_info?.author || 'YouTube Creator',
-        duration: info.basic_info?.duration || 0,
-        format: {
-          itag: targetFormat.itag,
-          mimeType: targetFormat.mime_type,
-          quality: targetFormat.quality_label || 'Audio'
-        },
-        provider: 'youtubei.js-tv'
-      });
+      if (targetFormat) {
+        console.log(`[API /stream] Tier 2 SUCCESS: YouTubei.js found format (itag: ${targetFormat.itag})`);
+        return res.status(200).json({
+          success: true,
+          title: info.basic_info?.title || 'YouTube Video',
+          author: info.basic_info?.author || 'YouTube Creator',
+          duration: info.basic_info?.duration || 0,
+          format: {
+            itag: targetFormat.itag,
+            mimeType: targetFormat.mime_type,
+            quality: targetFormat.quality_label || 'Audio'
+          },
+          provider: 'youtubei.js-tv'
+        });
+      }
     }
   } catch (t2Err) {
     lastError = t2Err;
