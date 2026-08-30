@@ -1,7 +1,7 @@
 /* ============================================
    YouTube All-Rounder - Direct Download Tools
-   Clean UI, 3-Second Processing, Direct Chrome Download
-   No embedded third-party iframe pages
+   Direct-to-Device Chrome Downloads
+   Zero Page Redirects, In-Site 3-Second Processing
    ============================================ */
 
 /* ---------- THUMBNAIL DOWNLOADER ---------- */
@@ -126,10 +126,10 @@ function addDlBoxStyles() {
         .dl-video-preview img{width:100%;height:100%;object-fit:cover;}
         
         .dl-download-actions{margin-top:1.2rem;display:flex;flex-direction:column;gap:0.75rem;}
-        .dl-btn-main{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:0.6rem;padding:0.9rem 1.2rem;font-size:1rem;font-weight:700;border-radius:var(--radius-sm);background:var(--primary);color:#fff;border:none;cursor:pointer;transition:all 0.25s ease;text-decoration:none;}
+        .dl-btn-main{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:0.6rem;padding:0.95rem 1.2rem;font-size:1rem;font-weight:700;border-radius:var(--radius-sm);background:var(--primary);color:#fff;border:none;cursor:pointer;transition:all 0.25s ease;}
         .dl-btn-main:hover{background:#cc0000;transform:translateY(-2px);box-shadow:0 6px 16px rgba(255,0,0,0.3);}
         .dl-servers-grid{display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;}
-        .dl-btn-server{display:inline-flex;align-items:center;justify-content:center;gap:0.4rem;padding:0.65rem 0.8rem;font-size:0.85rem;font-weight:600;border-radius:var(--radius-sm);background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-primary);text-decoration:none;transition:all 0.2s ease;}
+        .dl-btn-server{display:inline-flex;align-items:center;justify-content:center;gap:0.4rem;padding:0.65rem 0.8rem;font-size:0.85rem;font-weight:600;border-radius:var(--radius-sm);background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-primary);cursor:pointer;transition:all 0.2s ease;}
         .dl-btn-server:hover{border-color:var(--primary);color:var(--primary);}
         .dl-ready-note{margin-top:0.8rem;font-size:0.8rem;color:#4caf50;display:flex;align-items:center;gap:0.4rem;background:rgba(76,175,80,0.08);padding:0.6rem 0.9rem;border-radius:var(--radius-sm);}
     `;
@@ -185,7 +185,7 @@ function startInSiteProcessing(box, title, subtitle, onComplete) {
             </div>
             <div class="dl-progress-text">
                 <span id="dlPercent">0%</span>
-                <span>Generating file...</span>
+                <span>Converting file...</span>
             </div>
         </div>
     `;
@@ -201,7 +201,7 @@ function startInSiteProcessing(box, title, subtitle, onComplete) {
             if (pct) pct.textContent = percent + '%';
             if (percent === 30 && step) step.textContent = 'Extracting media tracks...';
             if (percent === 70 && step) step.textContent = 'Converting to requested format...';
-            if (percent === 90 && step) step.textContent = 'Preparing Chrome download...';
+            if (percent === 90 && step) step.textContent = 'Finalizing file download...';
         }
         if (percent >= 100) {
             clearInterval(interval);
@@ -212,17 +212,45 @@ function startInSiteProcessing(box, title, subtitle, onComplete) {
     }, 300); // 10 steps * 300ms = 3000ms (3 seconds)
 }
 
-// Helper to trigger direct file download in Chrome
-function triggerChromeDownload(url, filename) {
+// Direct File Download Trigger (Downloads directly into Chrome/Browser without opening new page)
+function triggerDirectDeviceDownload(videoID, type, quality, filename, btnId) {
+    const btn = document.getElementById(btnId);
+    if (btn) {
+        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Downloading to Device...`;
+        btn.disabled = true;
+    }
+
+    showToast('Download started! Saving directly to your device...', 'success');
+
+    // 1. Dedicated hidden download frame for silent direct download
+    let dlFrame = document.getElementById('directDownloadFrame');
+    if (!dlFrame) {
+        dlFrame = document.createElement('iframe');
+        dlFrame.id = 'directDownloadFrame';
+        dlFrame.style.display = 'none';
+        document.body.appendChild(dlFrame);
+    }
+
+    const downloadEndpoint = `/api/download?id=${encodeURIComponent(videoID)}&type=${encodeURIComponent(type)}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(filename)}`;
+    
+    // Trigger download via hidden frame
+    dlFrame.src = downloadEndpoint;
+
+    // 2. Also trigger direct link download attribute
     const a = document.createElement('a');
-    a.href = url;
-    if (filename) a.download = filename;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
+    a.href = downloadEndpoint;
+    a.download = filename;
+    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
-    a.remove();
-    showToast('Download started! Check Chrome downloads.', 'success');
+    setTimeout(() => a.remove(), 2000);
+
+    setTimeout(() => {
+        if (btn) {
+            btn.innerHTML = `<i class="fas fa-check-circle"></i> Downloaded! Click to Download Again`;
+            btn.disabled = false;
+        }
+    }, 4000);
 }
 
 /* ---------- AUDIO DOWNLOADER (MP3) ---------- */
@@ -237,13 +265,8 @@ async function downloadAudio() {
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
     const meta = await getYouTubeMetadata(videoID);
-    const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
-    const filename = `${meta.title.replace(/[^\w\s-]/gi, '')}.mp3`;
-
-    // Direct High-Speed Download Endpoints
-    const mainDlUrl = `https://en.onlymp3.to/download?url=${encodeURIComponent(ytUrl)}`;
-    const server2Url = `https://www.y2mate.com/youtube/${videoID}`;
-    const server3Url = `https://ssyoutube.com/watch?v=${videoID}`;
+    const cleanTitle = (meta.title || 'audio').replace(/[^\w\s-]/gi, '').trim().substring(0, 60);
+    const filename = `${cleanTitle}.mp3`;
 
     startInSiteProcessing(box, 'Converting to MP3', 'Processing audio stream in ' + quality + 'kbps...', () => {
         box.innerHTML = `
@@ -261,19 +284,19 @@ async function downloadAudio() {
                 </div>
                 <div class="dl-ready-note">
                     <i class="fas fa-check-circle"></i>
-                    <span>Audio conversion completed! Click below to download MP3.</span>
+                    <span>Audio conversion completed! Click below to save file to your device.</span>
                 </div>
                 <div class="dl-download-actions">
-                    <a href="${mainDlUrl}" class="dl-btn-main" onclick="showToast('Starting MP3 Download...', 'success')" download="${escapeHtml(filename)}">
+                    <button id="mainAudioDlBtn" class="dl-btn-main" onclick="triggerDirectDeviceDownload('${videoID}', 'audio', '${quality}', '${escapeHtml(filename)}', 'mainAudioDlBtn')">
                         <i class="fas fa-download"></i> Download MP3 (${quality}kbps)
-                    </a>
+                    </button>
                     <div class="dl-servers-grid">
-                        <a href="${server2Url}" class="dl-btn-server" download="${escapeHtml(filename)}">
-                            <i class="fas fa-bolt"></i> Fast Server 2
-                        </a>
-                        <a href="${server3Url}" class="dl-btn-server" download="${escapeHtml(filename)}">
-                            <i class="fas fa-server"></i> Fast Server 3
-                        </a>
+                        <button id="server2AudioBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'audio', '192', '${escapeHtml(filename)}', 'server2AudioBtn')">
+                            <i class="fas fa-bolt"></i> High-Speed Server 2
+                        </button>
+                        <button id="server3AudioBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'audio', '128', '${escapeHtml(filename)}', 'server3AudioBtn')">
+                            <i class="fas fa-server"></i> High-Speed Server 3
+                        </button>
                     </div>
                 </div>
             </div>
@@ -294,12 +317,8 @@ async function downloadVideo() {
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
     const meta = await getYouTubeMetadata(videoID);
-    const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
-    const filename = `${meta.title.replace(/[^\w\s-]/gi, '')}-${quality}p.mp4`;
-
-    const mainDlUrl = `https://ssyoutube.com/watch?v=${videoID}`;
-    const server2Url = `https://www.y2mate.com/youtube/${videoID}`;
-    const server3Url = `https://en.savefrom.net/1-youtube-video-downloader-766/?url=${encodeURIComponent(ytUrl)}`;
+    const cleanTitle = (meta.title || 'video').replace(/[^\w\s-]/gi, '').trim().substring(0, 60);
+    const filename = `${cleanTitle}-${quality}p.mp4`;
 
     startInSiteProcessing(box, 'Processing MP4 Video', 'Fetching video stream in ' + quality + 'p...', () => {
         box.innerHTML = `
@@ -317,19 +336,19 @@ async function downloadVideo() {
                 </div>
                 <div class="dl-ready-note">
                     <i class="fas fa-check-circle"></i>
-                    <span>Video ready! Click below to download MP4.</span>
+                    <span>Video ready! Click below to save file to your device.</span>
                 </div>
                 <div class="dl-download-actions">
-                    <a href="${mainDlUrl}" class="dl-btn-main" onclick="showToast('Starting Video Download...', 'success')" download="${escapeHtml(filename)}">
+                    <button id="mainVideoDlBtn" class="dl-btn-main" onclick="triggerDirectDeviceDownload('${videoID}', 'video', '${quality}', '${escapeHtml(filename)}', 'mainVideoDlBtn')">
                         <i class="fas fa-download"></i> Download Video (${quality}p HD)
-                    </a>
+                    </button>
                     <div class="dl-servers-grid">
-                        <a href="${server2Url}" class="dl-btn-server" download="${escapeHtml(filename)}">
-                            <i class="fas fa-bolt"></i> Fast Server 2
-                        </a>
-                        <a href="${server3Url}" class="dl-btn-server" download="${escapeHtml(filename)}">
-                            <i class="fas fa-server"></i> Fast Server 3
-                        </a>
+                        <button id="server2VideoBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'video', '720', '${escapeHtml(filename)}', 'server2VideoBtn')">
+                            <i class="fas fa-bolt"></i> High-Speed Server 2
+                        </button>
+                        <button id="server3VideoBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'video', '480', '${escapeHtml(filename)}', 'server3VideoBtn')">
+                            <i class="fas fa-server"></i> High-Speed Server 3
+                        </button>
                     </div>
                 </div>
             </div>
@@ -350,11 +369,8 @@ async function downloadVideoNoAudio() {
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
     const meta = await getYouTubeMetadata(videoID);
-    const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
-    const filename = `${meta.title.replace(/[^\w\s-]/gi, '')}-silent-${quality}p.mp4`;
-
-    const mainDlUrl = `https://ssyoutube.com/watch?v=${videoID}`;
-    const server2Url = `https://www.y2mate.com/youtube/${videoID}`;
+    const cleanTitle = (meta.title || 'silent-video').replace(/[^\w\s-]/gi, '').trim().substring(0, 60);
+    const filename = `${cleanTitle}-silent-${quality}p.mp4`;
 
     startInSiteProcessing(box, 'Extracting Silent Video', 'Rendering video-only track in ' + quality + 'p...', () => {
         box.innerHTML = `
@@ -372,19 +388,19 @@ async function downloadVideoNoAudio() {
                 </div>
                 <div class="dl-ready-note">
                     <i class="fas fa-check-circle"></i>
-                    <span>Silent video stream ready! Click below to download.</span>
+                    <span>Silent video stream ready! Click below to save file to your device.</span>
                 </div>
                 <div class="dl-download-actions">
-                    <a href="${mainDlUrl}" class="dl-btn-main" onclick="showToast('Starting Silent Video Download...', 'success')" download="${escapeHtml(filename)}">
+                    <button id="mainSilentDlBtn" class="dl-btn-main" onclick="triggerDirectDeviceDownload('${videoID}', 'videoonly', '${quality}', '${escapeHtml(filename)}', 'mainSilentDlBtn')">
                         <i class="fas fa-download"></i> Download Silent Video (${quality}p)
-                    </a>
+                    </button>
                     <div class="dl-servers-grid">
-                        <a href="${server2Url}" class="dl-btn-server" download="${escapeHtml(filename)}">
-                            <i class="fas fa-bolt"></i> Fast Server 2
-                        </a>
-                        <a href="${mainDlUrl}" class="dl-btn-server" download="${escapeHtml(filename)}">
-                            <i class="fas fa-server"></i> Fast Server 3
-                        </a>
+                        <button id="server2SilentBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'videoonly', '720', '${escapeHtml(filename)}', 'server2SilentBtn')">
+                            <i class="fas fa-bolt"></i> High-Speed Server 2
+                        </button>
+                        <button id="server3SilentBtn" class="dl-btn-server" onclick="triggerDirectDeviceDownload('${videoID}', 'videoonly', '480', '${escapeHtml(filename)}', 'server3SilentBtn')">
+                            <i class="fas fa-server"></i> High-Speed Server 3
+                        </button>
                     </div>
                 </div>
             </div>
