@@ -200,16 +200,18 @@ async function getCobaltStreams(videoID) {
     let lastErr = null;
     for (const base of COBALT_INSTANCES) {
         try {
-            const res = await fetchWithTimeout(base + '/', {
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 8000);
+            const res = await fetch(base + '/', {
                 method: 'POST',
                 headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoID}`, videoQuality: "720", audioFormat: "mp3", downloadMode: "auto" })
-            }, 8000);
-            // Try to parse
+                body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoID}`, videoQuality: "720", audioFormat: "mp3", downloadMode: "auto" }),
+                signal: controller.signal
+            });
+            clearTimeout(tid);
             if (!res.ok) throw new Error('cobalt status '+res.status);
             const data = await res.json();
             if (data.url) {
-                // Cobalt returns single URL, convert to piped-like
                 return {
                     title: 'Video',
                     uploader: '',
@@ -219,7 +221,6 @@ async function getCobaltStreams(videoID) {
             }
             throw new Error(data.error || 'no cobalt url');
         } catch (e) {
-            // Try with corsproxy for cobalt
             try {
                 const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(base + '/');
                 const res2 = await fetch(proxyUrl, {
@@ -348,13 +349,13 @@ async function downloadAudio() {
         audios.slice(0,6).forEach(a => {
             const br = a.bitrate ? Math.round(a.bitrate/1000)+' kbps' : (a.quality || 'audio');
             const ext = (a.mimeType||'').includes('webm') ? 'webm' : a.mimeType?.includes('mp4') ? 'm4a' : 'mp3';
-            const url = a.url;
+            const dlLink = '/api/download?id=' + videoID + '&type=audio' + (a.itag ? '&itag=' + a.itag : '');
             html += `
                 <div class="stream-row">
                     <div class="stream-meta"><strong>${br}</strong> • ${ext.toUpperCase()} <small>${a.codec || ''} ${formatBytes(a.contentLength)}</small></div>
                     <div class="stream-actions">
-                        <a href="${url}" download="yt-audio-${videoID}.${ext}" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download</a>
-                        <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('${url}')"><i class="fas fa-copy"></i></button>
+                        <a href="${dlLink}" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download</a>
+                        <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('${a.url}')"><i class="fas fa-copy"></i></button>
                     </div>
                 </div>`;
         });
@@ -364,10 +365,23 @@ async function downloadAudio() {
     } catch (err) {
         clearTimeout(fallbackTimer);
         console.error('audio error', err);
-        document.getElementById('audioFallback').style.display = 'block';
-        showToast('Using fallback - direct API blocked', 'info');
+        box.innerHTML = `
+            <div class="dl-error">
+                <i class="fas fa-music" style="color:#ff9800;font-size:1.8rem"></i>
+                <p><strong>Try downloading directly:</strong></p>
+                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
+                    <a href="/api/download?id=${videoID}&type=audio" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download Audio (MP3)</a>
+                </div>
+                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Or use partner sites:</p>
+                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
+                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp3" target="_blank" class="btn btn-secondary btn-sm">Loader.to</a>
+                    <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}&audio=1" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
+                    <a href="https://www.y2mate.com/youtube/${videoID}" target="_blank" class="btn btn-secondary btn-sm">Y2Mate</a>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="downloadAudio()"><i class="fas fa-redo"></i> Retry</button>
+            </div>`;
+        showToast('Try the direct download button', 'info');
     }
-}
 }
 
 /* ---------- VIDEO DOWNLOADER (FAST FALLBACK) ---------- */
@@ -423,11 +437,12 @@ async function downloadVideo() {
             const label = v.quality || (v.height ? v.height+'p' : 'video');
             const ext = v.mimeType?.includes('webm') ? 'webm' : 'mp4';
             const fps = v.fps ? ` ${v.fps}fps` : '';
+            const dlLink = '/api/download?id=' + videoID + '&type=video' + (v.itag ? '&itag=' + v.itag : '');
             html += `
                 <div class="stream-row">
                     <div class="stream-meta"><strong>${label}${fps}</strong> • ${ext} <small>${v.codec || ''} ${formatBytes(v.contentLength)}</small></div>
                     <div class="stream-actions">
-                        <a href="${v.url}" download="yt-video-${videoID}-${label}.${ext}" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download</a>
+                        <a href="${dlLink}" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download</a>
                         <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('${v.url}')"><i class="fas fa-copy"></i></button>
                     </div>
                 </div>`;
@@ -438,28 +453,22 @@ async function downloadVideo() {
     } catch (err) {
         clearTimeout(fallbackTimer);
         console.error(err);
-        document.getElementById('videoFallback').style.display = 'block';
-        showToast('Using fallback - direct API blocked', 'info');
-    }
-}
-        });
-        html += `</div><p style="margin-top:0.8rem;font-size:0.8rem;color:var(--text-muted)"><i class="fas fa-lightbulb"></i> Tip: Choose 720p for best compatibility.</p></div>`;
-        box.innerHTML = html;
-        showToast('Video streams loaded!', 'success');
-    } catch (err) {
-        console.error(err);
         box.innerHTML = `
             <div class="dl-error">
-                <i class="fas fa-exclamation-triangle"></i>
-                <p><strong>Direct download blocked</strong><br>Try fallback:</p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:1rem 0">
-                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp4" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-external-link-alt"></i> Loader.to</a>
+                <i class="fas fa-video" style="color:#ff9800;font-size:1.8rem"></i>
+                <p><strong>Try downloading directly:</strong></p>
+                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
+                    <a href="/api/download?id=${videoID}&type=video" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download Video (MP4)</a>
+                </div>
+                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Or use partner sites:</p>
+                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
+                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp4" target="_blank" class="btn btn-secondary btn-sm">Loader.to</a>
                     <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
                     <a href="https://www.y2mate.com/youtube/${videoID}" target="_blank" class="btn btn-secondary btn-sm">Y2Mate</a>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="downloadVideo()"><i class="fas fa-redo"></i> Retry Direct</button>
+                <button class="btn btn-primary btn-sm" onclick="downloadVideo()"><i class="fas fa-redo"></i> Retry</button>
             </div>`;
-        showToast('Using fallback', 'info');
+        showToast('Try the direct download button', 'info');
     }
 }
 
@@ -515,11 +524,12 @@ async function downloadVideoNoAudio() {
             const label = v.quality || (v.height ? v.height+'p' : 'video');
             const tag = v.videoOnly ? 'no audio' : 'with audio';
             const ext = v.mimeType?.includes('webm') ? 'webm' : 'mp4';
+            const dlLink = '/api/download?id=' + videoID + '&type=videoonly' + (v.itag ? '&itag=' + v.itag : '');
             html += `
                 <div class="stream-row">
                     <div class="stream-meta"><strong>${label}</strong> • ${ext} <small>${v.videoOnly ? 'no audio' : 'with audio'} ${formatBytes(v.contentLength)}</small></div>
                     <div class="stream-actions">
-                        <a href="${v.url}" download="yt-silent-${videoID}-${label}.${ext}" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download</a>
+                        <a href="${dlLink}" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download</a>
                         <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('${v.url}')"><i class="fas fa-copy"></i></button>
                     </div>
                 </div>`;
@@ -530,13 +540,17 @@ async function downloadVideoNoAudio() {
     } catch (err) {
         box.innerHTML = `
             <div class="dl-error">
-                <i class="fas fa-exclamation-triangle"></i>
-                <p><strong>Direct download blocked</strong><br>Try fallback:</p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:1rem 0">
-                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp4" target="_blank" class="btn btn-primary btn-sm">Loader.to</a>
+                <i class="fas fa-video-slash" style="color:#ff9800;font-size:1.8rem"></i>
+                <p><strong>Try downloading directly:</strong></p>
+                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
+                    <a href="/api/download?id=${videoID}&type=videoonly" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download Video (No Audio)</a>
+                </div>
+                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Or use partner sites:</p>
+                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
+                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp4" target="_blank" class="btn btn-secondary btn-sm">Loader.to</a>
                     <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="downloadVideoNoAudio()"><i class="fas fa-redo"></i> Retry Direct</button>
+                <button class="btn btn-primary btn-sm" onclick="downloadVideoNoAudio()"><i class="fas fa-redo"></i> Retry</button>
             </div>`;
         showToast('Using fallback', 'info');
     }

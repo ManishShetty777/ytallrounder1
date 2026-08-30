@@ -1,4 +1,12 @@
 {
+  "functions": {
+    "api/download.js": {
+      "maxDuration": 60
+    },
+    "api/stream.js": {
+      "maxDuration": 30
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",

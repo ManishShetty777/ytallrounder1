@@ -1,8 +1,6 @@
 // Vercel Serverless Function - YouTube Stream API
 // Deploy to Vercel: automatically becomes /api/stream?id=VIDEOID
-// Requires: npm install ytdl-core
-
-const ytdl = require('ytdl-core');
+const ytdl = require('@distube/ytdl-core');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -32,6 +30,7 @@ module.exports = async (req, res) => {
       fps: f.fps,
       hasAudio: !!f.hasAudio,
       hasVideo: !!f.hasVideo,
+      videoOnly: f.hasVideo && !f.hasAudio,
       contentLength: f.contentLength,
       container: f.container,
       codecs: f.codecs
