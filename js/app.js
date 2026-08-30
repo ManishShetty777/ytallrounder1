@@ -337,11 +337,11 @@ async function analyzeChannel() {
     async function fetchVercelChannel(parsed) {
         try {
             const q = parsed.type === 'id' ? `id=${parsed.value}` : `handle=${encodeURIComponent(parsed.value)}`;
-            const res = await fetchWithTimeout(`/api/channel?${q}`, 6000);
+            const res = await fetchWithTimeout(`/api/channel?${q}`, 12000);
             if (!res.ok) throw new Error('vercel channel not available');
             const data = await res.json();
             if (data.error) throw new Error(data.error);
-            if (data.name || data.subscriberCount) return data;
+            if (data.name || data.subscriberCount || data.videoCount) return data;
             throw new Error('no vercel data');
         } catch (e) { throw e; }
     }

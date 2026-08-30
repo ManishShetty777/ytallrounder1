@@ -1184,37 +1184,82 @@ img {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2rem;
+    gap: 1.5rem;
 }
 
-.qr-section p {
-    margin-bottom: 1rem;
-    font-size: 0.9rem;
-}
-
-.qr-placeholder {
-    width: 200px;
-    height: 200px;
-    background: var(--bg-secondary);
-    border: 2px dashed var(--border-color);
-    border-radius: var(--radius-md);
+.qr-section {
+    margin-top: 1.5rem;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    color: var(--text-muted);
+    gap: 0.9rem;
 }
 
-.qr-placeholder img {
+.qr-badge {
+    display: inline-block;
+    padding: 0.35rem 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+}
+
+.qr-dynamic-text {
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: 2.5px;
+    background: linear-gradient(270deg, #ff0055, #ff5500, #ffcc00, #00ddff, #a855f7, #ff0055);
+    background-size: 600% 600%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: qrGradientShift 6s ease infinite;
+    display: inline-block;
+}
+
+@keyframes qrGradientShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+.qr-card-wrapper {
+    width: 220px;
+    height: 220px;
+    padding: 10px;
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 25px rgba(255, 0, 0, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.qr-card-wrapper:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6), 0 0 35px rgba(255, 0, 0, 0.25);
+}
+
+.qr-image {
     width: 100%;
     height: 100%;
     object-fit: contain;
-    border-radius: var(--radius-md);
+    border-radius: 8px;
+    display: block;
 }
 
-.qr-placeholder i {
-    font-size: 3rem;
+.qr-scan-text {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+}
+
+.qr-scan-text i {
+    color: var(--primary);
+    font-size: 1.1rem;
 }
 
 /* ============================================
