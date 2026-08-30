@@ -1,6 +1,8 @@
 /* ============================================
    YouTube All-Rounder - Production Download System
-   Direct-to-Device Blob Downloader & State Machine
+   Strict State Machine:
+   Processing... -> Successfully extracted -> Ready to download -> Downloading... -> Complete
+   OR Processing... -> Extraction failed (real reason)
    ============================================ */
 
 /* ---------- THUMBNAIL DOWNLOADER ---------- */
@@ -130,7 +132,9 @@ function addDlBoxStyles() {
         .dl-btn-main:disabled{opacity:0.7;cursor:not-allowed;transform:none;}
         .dl-btn-retry{background:#d32f2f !important;}
         .dl-btn-retry:hover{background:#b71c1c !important;}
-        .dl-error-box{background:rgba(244,67,54,0.1);border:1px solid rgba(244,67,54,0.3);border-radius:var(--radius-sm);padding:0.75rem 1rem;color:#ff8a80;font-size:0.85rem;margin-top:0.8rem;display:flex;align-items:center;gap:0.5rem;}
+        .dl-error-box{background:rgba(244,67,54,0.1);border:1px solid rgba(244,67,54,0.3);border-radius:var(--radius-sm);padding:0.9rem 1.1rem;color:#ff8a80;font-size:0.85rem;margin-top:0.8rem;display:flex;flex-direction:column;gap:0.4rem;text-align:left;}
+        .dl-error-title{font-weight:700;display:flex;align-items:center;gap:0.5rem;color:#ff5252;}
+        .dl-error-details{font-size:0.8rem;color:#ffcdd2;word-break:break-all;font-family:monospace;background:rgba(0,0,0,0.2);padding:0.4rem 0.6rem;border-radius:4px;}
         .dl-ready-note{margin-top:0.8rem;font-size:0.8rem;color:#4caf50;display:flex;align-items:center;gap:0.4rem;background:rgba(76,175,80,0.08);padding:0.6rem 0.9rem;border-radius:var(--radius-sm);}
     `;
     document.head.appendChild(s);
@@ -172,73 +176,151 @@ async function getYouTubeMetadata(videoID) {
     };
 }
 
-// 3-Second In-Site Processing Animation (State: Preparing...)
-function startInSiteProcessing(box, title, subtitle, onComplete) {
+// Core Extraction & Validation Engine
+async function probeAndExtractStream(videoID, type, quality, meta, box, retryCallback) {
     addDlBoxStyles();
-    let percent = 0;
+
+    // 1. UI State: Processing / Extracting...
     box.innerHTML = `
         <div class="dl-processing-box">
-            <div class="dl-processing-title"><i class="fas fa-cog fa-spin" style="color:var(--primary);margin-right:0.5rem"></i> ${escapeHtml(title)}</div>
-            <div class="dl-processing-subtitle" id="dlStepText">${escapeHtml(subtitle)}</div>
+            <div class="dl-processing-title"><i class="fas fa-cog fa-spin" style="color:var(--primary);margin-right:0.5rem"></i> Extracting Media Stream...</div>
+            <div class="dl-processing-subtitle">Connecting to backend extraction service for ${type === 'audio' ? 'MP3 Audio' : 'MP4 Video'}...</div>
             <div class="dl-progress-bar-bg">
-                <div class="dl-progress-bar-fill" id="dlFill"></div>
+                <div class="dl-progress-bar-fill" style="width: 45%;"></div>
             </div>
             <div class="dl-progress-text">
-                <span id="dlPercent">0%</span>
-                <span>Preparing...</span>
+                <span>Processing...</span>
+                <span>Probing formats</span>
             </div>
         </div>
     `;
 
-    const fill = document.getElementById('dlFill');
-    const pct = document.getElementById('dlPercent');
-    const step = document.getElementById('dlStepText');
+    try {
+        const probeRes = await fetch(`/api/stream?id=${encodeURIComponent(videoID)}&type=${encodeURIComponent(type)}&quality=${encodeURIComponent(quality)}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        });
 
-    const interval = setInterval(() => {
-        percent += 10;
-        if (percent <= 100) {
-            if (fill) fill.style.width = percent + '%';
-            if (pct) pct.textContent = percent + '%';
-            if (percent === 30 && step) step.textContent = 'Extracting media tracks...';
-            if (percent === 70 && step) step.textContent = 'Validating stream formats...';
-            if (percent === 90 && step) step.textContent = 'Finalizing download stream...';
+        const probeData = await probeRes.json();
+
+        // If extraction failed from backend
+        if (!probeRes.ok || !probeData.success) {
+            const errorReason = probeData.error || `Extraction failed with HTTP ${probeRes.status}`;
+            const errorDetails = probeData.details || `Error code: ${probeData.code || probeRes.status} (${probeData.reason || 'UNKNOWN_ERROR'})`;
+
+            // UI State: Extraction Failed -> show REAL reason
+            box.innerHTML = `
+                <div class="dl-result-box">
+                    <div class="dl-head">
+                        <div class="dl-icon" style="background:rgba(244,67,54,0.15);color:#f44336"><i class="fas fa-exclamation-triangle"></i></div>
+                        <div class="dl-info">
+                            <strong>${escapeHtml(meta.title)}</strong>
+                            <p>${escapeHtml(meta.author)}</p>
+                            <span class="dl-badge" style="color:#ff8a80;"><i class="fas fa-times-circle"></i> Extraction Failed</span>
+                        </div>
+                    </div>
+                    <div class="dl-video-preview">
+                        <img src="${meta.thumbnail}" alt="thumb">
+                    </div>
+                    <div class="dl-error-box">
+                        <div class="dl-error-title"><i class="fas fa-times"></i> Extraction Error</div>
+                        <div>${escapeHtml(errorReason)}</div>
+                        <div class="dl-error-details">${escapeHtml(errorDetails)}</div>
+                    </div>
+                    <div class="dl-download-actions">
+                        <button class="dl-btn-main dl-btn-retry" onclick="(${retryCallback.toString()})()">
+                            <i class="fas fa-redo"></i> Retry Extraction
+                        </button>
+                    </div>
+                </div>
+            `;
+            showToast('Extraction failed: ' + errorReason, 'error');
+            return;
         }
-        if (percent >= 100) {
-            clearInterval(interval);
-            setTimeout(() => {
-                onComplete();
-            }, 300);
-        }
-    }, 300); // 3000ms total
+
+        // 2. UI State: Successfully extracted -> Ready to download
+        const cleanTitle = (meta.title || 'media').replace(/[^\w\s-]/gi, '').trim().substring(0, 60);
+        const ext = type === 'audio' ? 'mp3' : 'mp4';
+        const filename = `${cleanTitle}.${ext}`;
+
+        box.innerHTML = `
+            <div class="dl-result-box">
+                <div class="dl-head">
+                    <div class="dl-icon"><i class="fas ${type === 'audio' ? 'fa-music' : type === 'videoonly' ? 'fa-video-slash' : 'fa-video'}"></i></div>
+                    <div class="dl-info">
+                        <strong>${escapeHtml(meta.title)}</strong>
+                        <p>${escapeHtml(meta.author)}</p>
+                        <span class="dl-badge"><i class="fas fa-check-circle" style="color:#4caf50"></i> Verified • ${ext.toUpperCase()} ${quality}${type === 'audio' ? 'kbps' : 'p'}</span>
+                    </div>
+                </div>
+                <div class="dl-video-preview">
+                    <img src="${meta.thumbnail}" alt="thumb">
+                </div>
+                <div class="dl-ready-note">
+                    <i class="fas fa-check-circle"></i>
+                    <span>Successfully extracted! Ready to download directly to your device.</span>
+                </div>
+                <div id="${type}ErrorBox" class="dl-error-box" style="display:none;"></div>
+                <div class="dl-download-actions">
+                    <button id="main${type}DlBtn" class="dl-btn-main" onclick="executeProductionDownload('${videoID}', '${type}', '${quality}', '${escapeHtml(filename)}', 'main${type}DlBtn', '${type}ErrorBox')">
+                        <i class="fas fa-download"></i> Download ${ext.toUpperCase()} (Ready)
+                    </button>
+                </div>
+            </div>
+        `;
+        showToast('Successfully extracted! Ready to download.', 'success');
+    } catch (networkErr) {
+        console.error('[Probe Network Error]:', networkErr);
+        box.innerHTML = `
+            <div class="dl-result-box">
+                <div class="dl-head">
+                    <div class="dl-icon" style="background:rgba(244,67,54,0.15);color:#f44336"><i class="fas fa-wifi"></i></div>
+                    <div class="dl-info">
+                        <strong>${escapeHtml(meta.title)}</strong>
+                        <p>${escapeHtml(meta.author)}</p>
+                        <span class="dl-badge" style="color:#ff8a80;"><i class="fas fa-times-circle"></i> Network Error</span>
+                    </div>
+                </div>
+                <div class="dl-error-box">
+                    <div class="dl-error-title"><i class="fas fa-times"></i> Connection Error</div>
+                    <div>Unable to connect to extraction endpoint. Check your internet connection or server status.</div>
+                    <div class="dl-error-details">${escapeHtml(networkErr.message)}</div>
+                </div>
+                <div class="dl-download-actions">
+                    <button class="dl-btn-main dl-btn-retry" onclick="(${retryCallback.toString()})()">
+                        <i class="fas fa-redo"></i> Retry Connection
+                    </button>
+                </div>
+            </div>
+        `;
+        showToast('Network error during extraction', 'error');
+    }
 }
 
-// Production Download State Handler with Real Progress & Validation
+// Production Download Execution
 async function executeProductionDownload(videoID, type, quality, filename, btnId, errorBoxId) {
     const btn = document.getElementById(btnId);
     const errBox = errorBoxId ? document.getElementById(errorBoxId) : null;
 
     if (errBox) errBox.style.display = 'none';
 
-    // State: Starting download...
+    // UI State: Starting download...
     if (btn) {
         btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Starting download...`;
         btn.disabled = true;
         btn.classList.remove('dl-btn-retry');
     }
 
-    showToast('Starting download... Requesting file from server.', 'info');
+    showToast('Starting download... Streaming file from server.', 'info');
 
     const downloadEndpoint = `/api/download?id=${encodeURIComponent(videoID)}&type=${encodeURIComponent(type)}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(filename)}`;
 
     try {
         const response = await fetch(downloadEndpoint, {
             method: 'GET',
-            headers: {
-                'Accept': '*/*'
-            }
+            headers: { 'Accept': '*/*' }
         });
 
-        // Handle HTTP Status Codes
         if (!response.ok) {
             let errorMsg = `Server error (${response.status})`;
             try {
@@ -248,19 +330,18 @@ async function executeProductionDownload(videoID, type, quality, filename, btnId
             throw new Error(errorMsg);
         }
 
-        // Validate Content-Type
         const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('application/json') || contentType.includes('text/html')) {
+        if (contentType.includes('application/json')) {
             const text = await response.text();
             try {
                 const json = JSON.parse(text);
                 throw new Error(json.error || 'Server returned invalid format.');
             } catch(e) {
-                throw new Error('Server returned unexpected content type: ' + contentType);
+                throw new Error('Server returned JSON error response.');
             }
         }
 
-        // Read stream with live percentage
+        // UI State: Downloading (X%)...
         const contentLengthHeader = response.headers.get('content-length');
         const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
         let receivedBytes = 0;
@@ -285,10 +366,10 @@ async function executeProductionDownload(videoID, type, quality, filename, btnId
 
         const blob = new Blob(chunks, { type: type === 'audio' ? 'audio/mpeg' : 'video/mp4' });
         if (blob.size === 0) {
-            throw new Error('Downloaded file was empty.');
+            throw new Error('Received empty download stream.');
         }
 
-        // State: Download complete
+        // UI State: Complete
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = blobUrl;
@@ -305,9 +386,7 @@ async function executeProductionDownload(videoID, type, quality, filename, btnId
             btn.disabled = false;
         }
     } catch (err) {
-        console.error('[Download Failed]:', err);
-
-        // State: Download failed / Retry
+        console.error('[Download Stream Error]:', err);
         showToast('Download failed: ' + err.message, 'error');
 
         if (btn) {
@@ -318,7 +397,10 @@ async function executeProductionDownload(videoID, type, quality, filename, btnId
 
         if (errBox) {
             errBox.style.display = 'flex';
-            errBox.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <span><strong>Error:</strong> ${escapeHtml(err.message)}</span>`;
+            errBox.innerHTML = `
+                <div class="dl-error-title"><i class="fas fa-times"></i> Stream Error</div>
+                <div>${escapeHtml(err.message)}</div>
+            `;
         }
     }
 }
@@ -335,39 +417,7 @@ async function downloadAudio() {
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
     const meta = await getYouTubeMetadata(videoID);
-    const cleanTitle = (meta.title || 'audio').replace(/[^\w\s-]/gi, '').trim().substring(0, 60);
-    const filename = `${cleanTitle}.mp3`;
-
-    // State: Preparing...
-    startInSiteProcessing(box, 'Preparing MP3 Download', 'Processing audio stream in ' + quality + 'kbps...', () => {
-        // State: Ready
-        box.innerHTML = `
-            <div class="dl-result-box">
-                <div class="dl-head">
-                    <div class="dl-icon"><i class="fas fa-music"></i></div>
-                    <div class="dl-info">
-                        <strong>${escapeHtml(meta.title)}</strong>
-                        <p>${escapeHtml(meta.author)}</p>
-                        <span class="dl-badge"><i class="fas fa-headphones"></i> MP3 • ${quality}kbps High Quality</span>
-                    </div>
-                </div>
-                <div class="dl-video-preview">
-                    <img src="${meta.thumbnail}" alt="thumb">
-                </div>
-                <div class="dl-ready-note">
-                    <i class="fas fa-check-circle"></i>
-                    <span>Ready to download. Click below to start saving the file to your device.</span>
-                </div>
-                <div id="audioErrorBox" class="dl-error-box" style="display:none;"></div>
-                <div class="dl-download-actions">
-                    <button id="mainAudioDlBtn" class="dl-btn-main" onclick="executeProductionDownload('${videoID}', 'audio', '${quality}', '${escapeHtml(filename)}', 'mainAudioDlBtn', 'audioErrorBox')">
-                        <i class="fas fa-download"></i> Download MP3 (${quality}kbps)
-                    </button>
-                </div>
-            </div>
-        `;
-        showToast('MP3 ready! Click Download.', 'success');
-    });
+    await probeAndExtractStream(videoID, 'audio', quality, meta, box, downloadAudio);
 }
 
 /* ---------- VIDEO DOWNLOADER (MP4) ---------- */
@@ -382,39 +432,7 @@ async function downloadVideo() {
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
     const meta = await getYouTubeMetadata(videoID);
-    const cleanTitle = (meta.title || 'video').replace(/[^\w\s-]/gi, '').trim().substring(0, 60);
-    const filename = `${cleanTitle}-${quality}p.mp4`;
-
-    // State: Preparing...
-    startInSiteProcessing(box, 'Preparing MP4 Video', 'Fetching video stream in ' + quality + 'p...', () => {
-        // State: Ready
-        box.innerHTML = `
-            <div class="dl-result-box">
-                <div class="dl-head">
-                    <div class="dl-icon" style="background:rgba(118,75,162,0.15);color:#9d65d8"><i class="fas fa-video"></i></div>
-                    <div class="dl-info">
-                        <strong>${escapeHtml(meta.title)}</strong>
-                        <p>${escapeHtml(meta.author)}</p>
-                        <span class="dl-badge"><i class="fas fa-film"></i> MP4 • ${quality}p HD Video</span>
-                    </div>
-                </div>
-                <div class="dl-video-preview">
-                    <img src="${meta.thumbnail}" alt="thumb">
-                </div>
-                <div class="dl-ready-note">
-                    <i class="fas fa-check-circle"></i>
-                    <span>Ready to download. Click below to start saving the file to your device.</span>
-                </div>
-                <div id="videoErrorBox" class="dl-error-box" style="display:none;"></div>
-                <div class="dl-download-actions">
-                    <button id="mainVideoDlBtn" class="dl-btn-main" onclick="executeProductionDownload('${videoID}', 'video', '${quality}', '${escapeHtml(filename)}', 'mainVideoDlBtn', 'videoErrorBox')">
-                        <i class="fas fa-download"></i> Download Video (${quality}p HD)
-                    </button>
-                </div>
-            </div>
-        `;
-        showToast('Video ready! Click Download.', 'success');
-    });
+    await probeAndExtractStream(videoID, 'video', quality, meta, box, downloadVideo);
 }
 
 /* ---------- VIDEO WITHOUT AUDIO (SILENT / EDITING) ---------- */
@@ -429,39 +447,7 @@ async function downloadVideoNoAudio() {
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
     const meta = await getYouTubeMetadata(videoID);
-    const cleanTitle = (meta.title || 'silent-video').replace(/[^\w\s-]/gi, '').trim().substring(0, 60);
-    const filename = `${cleanTitle}-silent-${quality}p.mp4`;
-
-    // State: Preparing...
-    startInSiteProcessing(box, 'Preparing Silent Video', 'Rendering video-only track in ' + quality + 'p...', () => {
-        // State: Ready
-        box.innerHTML = `
-            <div class="dl-result-box">
-                <div class="dl-head">
-                    <div class="dl-icon" style="background:rgba(255,107,107,0.15);color:#ff6b6b"><i class="fas fa-video-slash"></i></div>
-                    <div class="dl-info">
-                        <strong>${escapeHtml(meta.title)}</strong>
-                        <p>${escapeHtml(meta.author)}</p>
-                        <span class="dl-badge"><i class="fas fa-volume-mute"></i> MP4 • Silent Video (${quality}p)</span>
-                    </div>
-                </div>
-                <div class="dl-video-preview">
-                    <img src="${meta.thumbnail}" alt="thumb">
-                </div>
-                <div class="dl-ready-note">
-                    <i class="fas fa-check-circle"></i>
-                    <span>Ready to download. Click below to start saving the file to your device.</span>
-                </div>
-                <div id="noaudioErrorBox" class="dl-error-box" style="display:none;"></div>
-                <div class="dl-download-actions">
-                    <button id="mainSilentDlBtn" class="dl-btn-main" onclick="executeProductionDownload('${videoID}', 'videoonly', '${quality}', '${escapeHtml(filename)}', 'mainSilentDlBtn', 'noaudioErrorBox')">
-                        <i class="fas fa-download"></i> Download Silent Video (${quality}p)
-                    </button>
-                </div>
-            </div>
-        `;
-        showToast('Silent video ready! Click Download.', 'success');
-    });
+    await probeAndExtractStream(videoID, 'videoonly', quality, meta, box, downloadVideoNoAudio);
 }
 
 function escapeHtml(s) {
