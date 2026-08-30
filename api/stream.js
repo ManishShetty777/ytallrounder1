@@ -90,6 +90,8 @@ module.exports = async (req, res) => {
       } catch (agentErr) {
         console.warn('[API /stream] Tier 1 agent error:', agentErr.message);
       }
+    } else {
+      console.warn('[API /stream] YOUTUBE_COOKIE is unset in environment variables; running anonymous Tier 1 request');
     }
 
     const info = await ytdl.getInfo(ytUrl, {
@@ -100,6 +102,10 @@ module.exports = async (req, res) => {
         }
       }
     });
+
+    if (!info || !info.formats || !Array.isArray(info.formats)) {
+      throw new Error('YTDL did not return a valid formats array for this video.');
+    }
 
     const filter = type === 'audio' ? 'audioonly' : type === 'videoonly' ? 'videoonly' : 'audioandvideo';
     const qualityOpt = type === 'audio' ? 'highestaudio' : 'highest';
@@ -126,36 +132,56 @@ module.exports = async (req, res) => {
   }
 
   // ----------------------------------------------------
-  // TIER 2: YouTube.js Dynamic ESM Import (TV Context & Raw Error Pass-Through)
+  // TIER 2: YouTube.js Dynamic ESM Import (TV Context & Defensive Null Checks)
   // ----------------------------------------------------
   try {
     const yt = await getInnertubeInstance();
-    if (yt) {
-      console.log('[API /stream] Tier 2: Calling Innertube.getInfo()...');
-      const info = await yt.getInfo(videoID);
-      
-      const formats = info.streaming_data?.adaptive_formats || [];
-      const targetFormat = type === 'audio'
-        ? formats.find(f => f.has_audio && !f.has_video)
-        : formats.find(f => f.has_video);
+    if (!yt) {
+      throw new Error('Innertube instance could not be initialized.');
+    }
 
-      if (targetFormat) {
-        console.log(`[API /stream] Tier 2 SUCCESS: YouTubei.js found format (itag: ${targetFormat.itag})`);
-        return res.status(200).json({
-          success: true,
-          title: info.basic_info?.title || 'YouTube Video',
-          author: info.basic_info?.author || 'YouTube Creator',
-          duration: info.basic_info?.duration || 0,
-          format: {
-            itag: targetFormat.itag,
-            mimeType: targetFormat.mime_type,
-            quality: targetFormat.quality_label || 'Audio'
-          },
-          provider: 'youtubei.js-tv'
-        });
-      } else {
-        throw new Error(`YouTubei.js returned 0 matching stream formats for type: ${type}`);
-      }
+    console.log('[API /stream] Tier 2: Calling Innertube.getInfo()...');
+    const info = await yt.getInfo(videoID);
+    
+    if (!info) {
+      throw new Error('Innertube returned an empty response object.');
+    }
+
+    const streamingData = info.streaming_data;
+    if (!streamingData) {
+      const playability = info.playability_status?.status || 'UNKNOWN';
+      const playabilityReason = info.playability_status?.reason || 'No streaming data returned by YouTube';
+      throw new Error(`YouTube streaming data unavailable (Playability status: ${playability} - ${playabilityReason})`);
+    }
+
+    const formats = Array.isArray(streamingData.formats) ? streamingData.formats : [];
+    const adaptiveFormats = Array.isArray(streamingData.adaptive_formats) ? streamingData.adaptive_formats : [];
+    const allFormats = [...formats, ...adaptiveFormats];
+
+    if (allFormats.length === 0) {
+      throw new Error('YouTube returned streaming data, but formats array is empty.');
+    }
+
+    const targetFormat = type === 'audio'
+      ? allFormats.find(f => f?.has_audio && !f?.has_video) || allFormats.find(f => f?.has_audio)
+      : allFormats.find(f => f?.has_video && f?.has_audio) || allFormats.find(f => f?.has_video);
+
+    if (targetFormat) {
+      console.log(`[API /stream] Tier 2 SUCCESS: YouTubei.js found format (itag: ${targetFormat.itag})`);
+      return res.status(200).json({
+        success: true,
+        title: info.basic_info?.title || 'YouTube Video',
+        author: info.basic_info?.author || 'YouTube Creator',
+        duration: info.basic_info?.duration || 0,
+        format: {
+          itag: targetFormat.itag,
+          mimeType: targetFormat.mime_type || targetFormat.mimeType,
+          quality: targetFormat.quality_label || targetFormat.quality || 'Audio'
+        },
+        provider: 'youtubei.js-tv'
+      });
+    } else {
+      throw new Error(`YouTubei.js found ${allFormats.length} formats, but none matched requested type: ${type}`);
     }
   } catch (t2Err) {
     console.error('[API /stream] Tier 2 RAW ERROR from Innertube.getInfo():', t2Err);
@@ -192,13 +218,13 @@ module.exports = async (req, res) => {
       if (cobaltRes.ok) {
         const cobaltData = await cobaltRes.json();
         let mediaUrl = null;
-        if (cobaltData.url) mediaUrl = cobaltData.url;
-        else if (cobaltData.tunnel) mediaUrl = Array.isArray(cobaltData.tunnel) ? cobaltData.tunnel[0] : cobaltData.tunnel;
-        else if (cobaltData.output?.url) mediaUrl = cobaltData.output.url;
-        else if (typeof cobaltData.output === 'string') mediaUrl = cobaltData.output;
-        else if (cobaltData.picker && Array.isArray(cobaltData.picker) && cobaltData.picker[0]?.url) mediaUrl = cobaltData.picker[0].url;
+        if (cobaltData?.url) mediaUrl = cobaltData.url;
+        else if (cobaltData?.tunnel) mediaUrl = Array.isArray(cobaltData.tunnel) ? cobaltData.tunnel[0] : cobaltData.tunnel;
+        else if (cobaltData?.output?.url) mediaUrl = cobaltData.output.url;
+        else if (typeof cobaltData?.output === 'string') mediaUrl = cobaltData.output;
+        else if (cobaltData?.picker && Array.isArray(cobaltData.picker) && cobaltData.picker[0]?.url) mediaUrl = cobaltData.picker[0].url;
 
-        if (mediaUrl || cobaltData.status === 'redirect' || cobaltData.status === 'tunnel') {
+        if (mediaUrl || cobaltData?.status === 'redirect' || cobaltData?.status === 'tunnel') {
           console.log('[API /stream] Tier 3 SUCCESS: Cobalt resolved media URL');
           return res.status(200).json({
             success: true,
