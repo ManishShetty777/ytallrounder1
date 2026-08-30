@@ -1,9 +1,8 @@
 // Vercel Serverless Function - Production Media Stream & Extraction Prober
-// Multi-Tier Fallback Chain: Authenticated YTDL -> YouTubei.js (TV/Embedded Dynamic ESM) -> Hosted Cobalt API
+// Passes through authentic raw underlying error diagnostics and logs full stack traces
 
 const ytdl = require('@distube/ytdl-core');
 
-// Cache Innertube instance across warm serverless invocations
 let cachedInnertube = null;
 
 async function getInnertubeInstance() {
@@ -12,12 +11,13 @@ async function getInnertubeInstance() {
     const { Innertube, UniversalCache, ClientType } = await import('youtubei.js');
     cachedInnertube = await Innertube.create({
       cache: new UniversalCache(false),
-      client_type: ClientType.TV_EMBEDDED,
+      client_type: ClientType.TV,
+      generate_session_locally: true,
       retrieve_player: true
     });
     return cachedInnertube;
   } catch (err) {
-    console.warn('[API /stream] Dynamic import of youtubei.js failed:', err.message);
+    console.error('[API /stream] Innertube initialization error:', err);
     return null;
   }
 }
@@ -71,9 +71,9 @@ module.exports = async (req, res) => {
   }
 
   const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
-  console.log(`[API /stream] Probing video ${videoID} (type: ${type}, quality: ${quality})`);
+  console.log(`[API /stream] Starting extraction probe for ${videoID} (type: ${type}, quality: ${quality})`);
 
-  let lastError = null;
+  const tierErrors = [];
 
   // ----------------------------------------------------
   // TIER 1: Authenticated @distube/ytdl-core (Session Cookies)
@@ -86,12 +86,10 @@ module.exports = async (req, res) => {
     if (parsedCookies) {
       try {
         agent = ytdl.createAgent(parsedCookies);
-        console.log(`[API /stream] Tier 1: Agent initialized with ${parsedCookies.length} session cookies`);
+        console.log(`[API /stream] Tier 1: Initialized agent with ${parsedCookies.length} session cookies`);
       } catch (agentErr) {
-        console.warn('[API /stream] Tier 1 agent creation error:', agentErr.message);
+        console.warn('[API /stream] Tier 1 agent error:', agentErr.message);
       }
-    } else {
-      console.warn('[API /stream] YOUTUBE_COOKIE is unset in environment variables; running anonymous Tier 1 request');
     }
 
     const info = await ytdl.getInfo(ytUrl, {
@@ -123,17 +121,19 @@ module.exports = async (req, res) => {
       });
     }
   } catch (t1Err) {
-    lastError = t1Err;
-    console.warn('[API /stream] Tier 1 (ytdl-core) failed:', t1Err.message);
+    console.error('[API /stream] Tier 1 RAW ERROR:', t1Err);
+    tierErrors.push({ tier: 'ytdl-core', message: t1Err.message, stack: t1Err.stack });
   }
 
   // ----------------------------------------------------
-  // TIER 2: YouTube.js Dynamic ESM Import (TV Context & Warm Cache)
+  // TIER 2: YouTube.js Dynamic ESM Import (TV Context & Raw Error Pass-Through)
   // ----------------------------------------------------
   try {
     const yt = await getInnertubeInstance();
     if (yt) {
+      console.log('[API /stream] Tier 2: Calling Innertube.getInfo()...');
       const info = await yt.getInfo(videoID);
+      
       const formats = info.streaming_data?.adaptive_formats || [];
       const targetFormat = type === 'audio'
         ? formats.find(f => f.has_audio && !f.has_video)
@@ -153,25 +153,25 @@ module.exports = async (req, res) => {
           },
           provider: 'youtubei.js-tv'
         });
+      } else {
+        throw new Error(`YouTubei.js returned 0 matching stream formats for type: ${type}`);
       }
     }
   } catch (t2Err) {
-    lastError = t2Err;
-    console.warn('[API /stream] Tier 2 (youtubei.js) failed:', t2Err.message);
+    console.error('[API /stream] Tier 2 RAW ERROR from Innertube.getInfo():', t2Err);
+    tierErrors.push({ tier: 'youtubei.js', message: t2Err.message, stack: t2Err.stack });
   }
 
   // ----------------------------------------------------
   // TIER 3: Hosted Cobalt API Endpoint (Env-Var Only)
   // ----------------------------------------------------
   const cobaltBase = process.env.COBALT_API_URL || null;
-  if (!cobaltBase) {
-    console.warn('[API /stream] COBALT_API_URL is unset; Tier 3 (hosted Cobalt service) is disabled.');
-  } else {
+  if (cobaltBase) {
     try {
       const cobaltHeaders = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0'
       };
       if (process.env.COBALT_API_KEY) {
         cobaltHeaders['Authorization'] = `Api-Key ${process.env.COBALT_API_KEY}`;
@@ -192,17 +192,11 @@ module.exports = async (req, res) => {
       if (cobaltRes.ok) {
         const cobaltData = await cobaltRes.json();
         let mediaUrl = null;
-        if (cobaltData.url) {
-          mediaUrl = cobaltData.url;
-        } else if (cobaltData.tunnel) {
-          mediaUrl = Array.isArray(cobaltData.tunnel) ? cobaltData.tunnel[0] : cobaltData.tunnel;
-        } else if (cobaltData.output?.url) {
-          mediaUrl = cobaltData.output.url;
-        } else if (typeof cobaltData.output === 'string') {
-          mediaUrl = cobaltData.output;
-        } else if (cobaltData.picker && Array.isArray(cobaltData.picker) && cobaltData.picker[0]?.url) {
-          mediaUrl = cobaltData.picker[0].url;
-        }
+        if (cobaltData.url) mediaUrl = cobaltData.url;
+        else if (cobaltData.tunnel) mediaUrl = Array.isArray(cobaltData.tunnel) ? cobaltData.tunnel[0] : cobaltData.tunnel;
+        else if (cobaltData.output?.url) mediaUrl = cobaltData.output.url;
+        else if (typeof cobaltData.output === 'string') mediaUrl = cobaltData.output;
+        else if (cobaltData.picker && Array.isArray(cobaltData.picker) && cobaltData.picker[0]?.url) mediaUrl = cobaltData.picker[0].url;
 
         if (mediaUrl || cobaltData.status === 'redirect' || cobaltData.status === 'tunnel') {
           console.log('[API /stream] Tier 3 SUCCESS: Cobalt resolved media URL');
@@ -218,43 +212,26 @@ module.exports = async (req, res) => {
         }
       }
     } catch (t3Err) {
-      lastError = t3Err;
-      console.warn('[API /stream] Tier 3 (Cobalt) failed:', t3Err.message);
+      console.error('[API /stream] Tier 3 RAW ERROR:', t3Err);
+      tierErrors.push({ tier: 'cobalt-api', message: t3Err.message });
     }
   }
 
   // ----------------------------------------------------
-  // DIAGNOSTIC ERROR HANDLER
+  // RAW ERROR PASS-THROUGH (No Fake 404 Overwrites)
   // ----------------------------------------------------
-  const errMsg = lastError?.message || 'Extraction pipeline failed';
-  let statusCode = 503;
-  let reason = 'EXTRACTOR_BLOCKED';
-  let userFriendlyError = 'Extraction service temporarily unavailable. Please retry in a few moments.';
+  const primaryError = tierErrors[0]?.message || tierErrors[1]?.message || 'Extraction failed across all tiers';
+  const allTierDetails = tierErrors.map(e => `[${e.tier}]: ${e.message}`).join(' | ');
 
-  if (errMsg.includes('429') || errMsg.includes('Sign in to confirm you\'re not a bot') || errMsg.includes('bot')) {
-    statusCode = 429;
-    reason = 'YOUTUBE_BOT_DETECTION';
-    userFriendlyError = 'YouTube bot protection temporarily blocked this datacenter request. Set YOUTUBE_COOKIE in your Vercel Project Settings to enable 100% continuous extraction.';
-  } else if (errMsg.includes('404') || errMsg.includes('Video unavailable') || errMsg.includes('not found')) {
-    statusCode = 404;
-    reason = 'VIDEO_NOT_FOUND';
-    userFriendlyError = 'This YouTube video was not found or has been removed.';
-  } else if (errMsg.includes('403') || errMsg.includes('private video')) {
-    statusCode = 403;
-    reason = 'FORBIDDEN_OR_AGE_RESTRICTED';
-    userFriendlyError = 'This video is private, age-restricted, or region-restricted by YouTube.';
-  } else if (errMsg.includes('timeout') || errMsg.includes('ETIMEDOUT')) {
-    statusCode = 408;
-    reason = 'TIMEOUT';
-    userFriendlyError = 'The extraction request timed out. Please retry.';
-  }
+  console.error('[API /stream] ALL TIERS FAILED. Details:', allTierDetails);
 
-  return res.status(statusCode).json({
+  return res.status(503).json({
     success: false,
-    code: statusCode,
-    reason,
-    error: userFriendlyError,
-    details: errMsg.substring(0, 180),
+    code: 503,
+    reason: 'EXTRACTION_PIPELINE_ERROR',
+    error: primaryError,
+    details: allTierDetails,
+    tierErrors,
     videoID
   });
 };
