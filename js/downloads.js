@@ -1,7 +1,6 @@
 /* ============================================
-   YouTube All-Rounder - Direct Download Tools
-   100% In-Site Blob & Device Downloads
-   Zero External Redirects, Real-Time Chrome Saving
+   YouTube All-Rounder - Production Download System
+   Direct-to-Device Blob Downloader & State Machine
    ============================================ */
 
 /* ---------- THUMBNAIL DOWNLOADER ---------- */
@@ -60,12 +59,12 @@ async function downloadThumbBlob(url, filename) {
         let blob;
         try {
             const res = await fetch(url, { mode: 'cors' });
-            if (!res.ok) throw new Error('no cors');
+            if (!res.ok) throw new Error('CORS request failed');
             blob = await res.blob();
         } catch (e) {
             const proxy = 'https://corsproxy.io/?' + encodeURIComponent(url);
             const res2 = await fetch(proxy);
-            if (!res2.ok) throw new Error('proxy failed');
+            if (!res2.ok) throw new Error('Proxy fallback failed');
             blob = await res2.blob();
         }
         const blobUrl = URL.createObjectURL(blob);
@@ -76,12 +75,12 @@ async function downloadThumbBlob(url, filename) {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
-        showToast('Thumbnail downloaded directly to device!', 'success');
+        showToast('Thumbnail downloaded successfully!', 'success');
         if (status) status.textContent = 'Downloaded';
     } catch (err) {
-        console.error(err);
+        console.error('Thumbnail download error:', err);
         window.open(url, '_blank');
-        showToast('Opened in new tab - right click to save', 'info');
+        showToast('Opened thumbnail in new tab to save manually', 'info');
         if (status) status.textContent = 'Opened';
     }
 }
@@ -129,9 +128,9 @@ function addDlBoxStyles() {
         .dl-btn-main{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:0.6rem;padding:0.95rem 1.2rem;font-size:1rem;font-weight:700;border-radius:var(--radius-sm);background:var(--primary);color:#fff;border:none;cursor:pointer;transition:all 0.25s ease;}
         .dl-btn-main:hover{background:#cc0000;transform:translateY(-2px);box-shadow:0 6px 16px rgba(255,0,0,0.3);}
         .dl-btn-main:disabled{opacity:0.7;cursor:not-allowed;transform:none;}
-        .dl-servers-grid{display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;}
-        .dl-btn-server{display:inline-flex;align-items:center;justify-content:center;gap:0.4rem;padding:0.65rem 0.8rem;font-size:0.85rem;font-weight:600;border-radius:var(--radius-sm);background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-primary);cursor:pointer;transition:all 0.2s ease;}
-        .dl-btn-server:hover{border-color:var(--primary);color:var(--primary);}
+        .dl-btn-retry{background:#d32f2f !important;}
+        .dl-btn-retry:hover{background:#b71c1c !important;}
+        .dl-error-box{background:rgba(244,67,54,0.1);border:1px solid rgba(244,67,54,0.3);border-radius:var(--radius-sm);padding:0.75rem 1rem;color:#ff8a80;font-size:0.85rem;margin-top:0.8rem;display:flex;align-items:center;gap:0.5rem;}
         .dl-ready-note{margin-top:0.8rem;font-size:0.8rem;color:#4caf50;display:flex;align-items:center;gap:0.4rem;background:rgba(76,175,80,0.08);padding:0.6rem 0.9rem;border-radius:var(--radius-sm);}
     `;
     document.head.appendChild(s);
@@ -173,7 +172,7 @@ async function getYouTubeMetadata(videoID) {
     };
 }
 
-// 3-Second In-Site Processing Animation
+// 3-Second In-Site Processing Animation (State: Preparing...)
 function startInSiteProcessing(box, title, subtitle, onComplete) {
     addDlBoxStyles();
     let percent = 0;
@@ -186,7 +185,7 @@ function startInSiteProcessing(box, title, subtitle, onComplete) {
             </div>
             <div class="dl-progress-text">
                 <span id="dlPercent">0%</span>
-                <span>Processing media...</span>
+                <span>Preparing...</span>
             </div>
         </div>
     `;
@@ -201,8 +200,8 @@ function startInSiteProcessing(box, title, subtitle, onComplete) {
             if (fill) fill.style.width = percent + '%';
             if (pct) pct.textContent = percent + '%';
             if (percent === 30 && step) step.textContent = 'Extracting media tracks...';
-            if (percent === 70 && step) step.textContent = 'Converting to requested format...';
-            if (percent === 90 && step) step.textContent = 'Preparing direct device download...';
+            if (percent === 70 && step) step.textContent = 'Validating stream formats...';
+            if (percent === 90 && step) step.textContent = 'Finalizing download stream...';
         }
         if (percent >= 100) {
             clearInterval(interval);
@@ -210,28 +209,86 @@ function startInSiteProcessing(box, title, subtitle, onComplete) {
                 onComplete();
             }, 300);
         }
-    }, 300); // 10 steps * 300ms = 3000ms (3 seconds)
+    }, 300); // 3000ms total
 }
 
-// Direct In-Site File Downloader (Fetches binary Blob and triggers native Chrome save)
-async function downloadDirectBlobFile(videoID, type, quality, filename, btnId) {
+// Production Download State Handler with Real Progress & Validation
+async function executeProductionDownload(videoID, type, quality, filename, btnId, errorBoxId) {
     const btn = document.getElementById(btnId);
+    const errBox = errorBoxId ? document.getElementById(errorBoxId) : null;
+
+    if (errBox) errBox.style.display = 'none';
+
+    // State: Starting download...
     if (btn) {
-        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Downloading to Device...`;
+        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Starting download...`;
         btn.disabled = true;
+        btn.classList.remove('dl-btn-retry');
     }
 
-    showToast('Starting download... Please wait a moment.', 'info');
+    showToast('Starting download... Requesting file from server.', 'info');
 
-    const endpoint = `/api/download?id=${encodeURIComponent(videoID)}&type=${encodeURIComponent(type)}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(filename)}`;
+    const downloadEndpoint = `/api/download?id=${encodeURIComponent(videoID)}&type=${encodeURIComponent(type)}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(filename)}`;
 
     try {
-        const res = await fetch(endpoint);
-        if (!res.ok) throw new Error('Download endpoint returned ' + res.status);
-        
-        const blob = await res.blob();
-        if (!blob || blob.size < 100) throw new Error('Empty file received');
+        const response = await fetch(downloadEndpoint, {
+            method: 'GET',
+            headers: {
+                'Accept': '*/*'
+            }
+        });
 
+        // Handle HTTP Status Codes
+        if (!response.ok) {
+            let errorMsg = `Server error (${response.status})`;
+            try {
+                const errData = await response.json();
+                if (errData.error) errorMsg = errData.error;
+            } catch(e) {}
+            throw new Error(errorMsg);
+        }
+
+        // Validate Content-Type
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json') || contentType.includes('text/html')) {
+            const text = await response.text();
+            try {
+                const json = JSON.parse(text);
+                throw new Error(json.error || 'Server returned invalid format.');
+            } catch(e) {
+                throw new Error('Server returned unexpected content type: ' + contentType);
+            }
+        }
+
+        // Read stream with live percentage
+        const contentLengthHeader = response.headers.get('content-length');
+        const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
+        let receivedBytes = 0;
+
+        const reader = response.body.getReader();
+        const chunks = [];
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            receivedBytes += value.length;
+
+            if (totalBytes > 0 && btn) {
+                const pct = Math.min(99, Math.round((receivedBytes / totalBytes) * 100));
+                btn.innerHTML = `<i class="fas fa-download fa-bounce"></i> Downloading (${pct}%)...`;
+            } else if (btn) {
+                const mb = (receivedBytes / (1024 * 1024)).toFixed(1);
+                btn.innerHTML = `<i class="fas fa-download fa-bounce"></i> Downloading (${mb}MB)...`;
+            }
+        }
+
+        const blob = new Blob(chunks, { type: type === 'audio' ? 'audio/mpeg' : 'video/mp4' });
+        if (blob.size === 0) {
+            throw new Error('Downloaded file was empty.');
+        }
+
+        // State: Download complete
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = blobUrl;
@@ -239,27 +296,29 @@ async function downloadDirectBlobFile(videoID, type, quality, filename, btnId) {
         document.body.appendChild(a);
         a.click();
         a.remove();
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 20000);
 
-        showToast('Download complete! Saved directly to your device.', 'success');
+        showToast('Download complete! File saved to your device.', 'success');
+
         if (btn) {
-            btn.innerHTML = `<i class="fas fa-check-circle"></i> Downloaded! Click to Download Again`;
+            btn.innerHTML = `<i class="fas fa-check-circle"></i> Download Complete (Click to download again)`;
             btn.disabled = false;
         }
     } catch (err) {
-        console.warn('Blob download fallback, triggering native direct stream:', err.message);
-        // Fallback: Trigger direct anchor download without navigating page
-        const a = document.createElement('a');
-        a.href = endpoint;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        console.error('[Download Failed]:', err);
 
-        showToast('Download request sent to browser!', 'success');
+        // State: Download failed / Retry
+        showToast('Download failed: ' + err.message, 'error');
+
         if (btn) {
-            btn.innerHTML = `<i class="fas fa-check-circle"></i> Download Started! Click to Retry`;
+            btn.innerHTML = `<i class="fas fa-redo"></i> Download Failed - Retry`;
             btn.disabled = false;
+            btn.classList.add('dl-btn-retry');
+        }
+
+        if (errBox) {
+            errBox.style.display = 'flex';
+            errBox.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <span><strong>Error:</strong> ${escapeHtml(err.message)}</span>`;
         }
     }
 }
@@ -279,7 +338,9 @@ async function downloadAudio() {
     const cleanTitle = (meta.title || 'audio').replace(/[^\w\s-]/gi, '').trim().substring(0, 60);
     const filename = `${cleanTitle}.mp3`;
 
-    startInSiteProcessing(box, 'Converting to MP3', 'Processing audio stream in ' + quality + 'kbps...', () => {
+    // State: Preparing...
+    startInSiteProcessing(box, 'Preparing MP3 Download', 'Processing audio stream in ' + quality + 'kbps...', () => {
+        // State: Ready
         box.innerHTML = `
             <div class="dl-result-box">
                 <div class="dl-head">
@@ -295,20 +356,13 @@ async function downloadAudio() {
                 </div>
                 <div class="dl-ready-note">
                     <i class="fas fa-check-circle"></i>
-                    <span>Audio ready! Click Download below to save file to your device.</span>
+                    <span>Ready to download. Click below to start saving the file to your device.</span>
                 </div>
+                <div id="audioErrorBox" class="dl-error-box" style="display:none;"></div>
                 <div class="dl-download-actions">
-                    <button id="mainAudioDlBtn" class="dl-btn-main" onclick="downloadDirectBlobFile('${videoID}', 'audio', '${quality}', '${escapeHtml(filename)}', 'mainAudioDlBtn')">
+                    <button id="mainAudioDlBtn" class="dl-btn-main" onclick="executeProductionDownload('${videoID}', 'audio', '${quality}', '${escapeHtml(filename)}', 'mainAudioDlBtn', 'audioErrorBox')">
                         <i class="fas fa-download"></i> Download MP3 (${quality}kbps)
                     </button>
-                    <div class="dl-servers-grid">
-                        <button id="server2AudioBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'audio', '192', '${escapeHtml(filename)}', 'server2AudioBtn')">
-                            <i class="fas fa-bolt"></i> Fast Server 2
-                        </button>
-                        <button id="server3AudioBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'audio', '128', '${escapeHtml(filename)}', 'server3AudioBtn')">
-                            <i class="fas fa-server"></i> Fast Server 3
-                        </button>
-                    </div>
                 </div>
             </div>
         `;
@@ -331,7 +385,9 @@ async function downloadVideo() {
     const cleanTitle = (meta.title || 'video').replace(/[^\w\s-]/gi, '').trim().substring(0, 60);
     const filename = `${cleanTitle}-${quality}p.mp4`;
 
-    startInSiteProcessing(box, 'Processing MP4 Video', 'Fetching video stream in ' + quality + 'p...', () => {
+    // State: Preparing...
+    startInSiteProcessing(box, 'Preparing MP4 Video', 'Fetching video stream in ' + quality + 'p...', () => {
+        // State: Ready
         box.innerHTML = `
             <div class="dl-result-box">
                 <div class="dl-head">
@@ -347,20 +403,13 @@ async function downloadVideo() {
                 </div>
                 <div class="dl-ready-note">
                     <i class="fas fa-check-circle"></i>
-                    <span>Video ready! Click Download below to save file to your device.</span>
+                    <span>Ready to download. Click below to start saving the file to your device.</span>
                 </div>
+                <div id="videoErrorBox" class="dl-error-box" style="display:none;"></div>
                 <div class="dl-download-actions">
-                    <button id="mainVideoDlBtn" class="dl-btn-main" onclick="downloadDirectBlobFile('${videoID}', 'video', '${quality}', '${escapeHtml(filename)}', 'mainVideoDlBtn')">
+                    <button id="mainVideoDlBtn" class="dl-btn-main" onclick="executeProductionDownload('${videoID}', 'video', '${quality}', '${escapeHtml(filename)}', 'mainVideoDlBtn', 'videoErrorBox')">
                         <i class="fas fa-download"></i> Download Video (${quality}p HD)
                     </button>
-                    <div class="dl-servers-grid">
-                        <button id="server2VideoBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'video', '720', '${escapeHtml(filename)}', 'server2VideoBtn')">
-                            <i class="fas fa-bolt"></i> Fast Server 2
-                        </button>
-                        <button id="server3VideoBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'video', '480', '${escapeHtml(filename)}', 'server3VideoBtn')">
-                            <i class="fas fa-server"></i> Fast Server 3
-                        </button>
-                    </div>
                 </div>
             </div>
         `;
@@ -383,7 +432,9 @@ async function downloadVideoNoAudio() {
     const cleanTitle = (meta.title || 'silent-video').replace(/[^\w\s-]/gi, '').trim().substring(0, 60);
     const filename = `${cleanTitle}-silent-${quality}p.mp4`;
 
-    startInSiteProcessing(box, 'Extracting Silent Video', 'Rendering video-only track in ' + quality + 'p...', () => {
+    // State: Preparing...
+    startInSiteProcessing(box, 'Preparing Silent Video', 'Rendering video-only track in ' + quality + 'p...', () => {
+        // State: Ready
         box.innerHTML = `
             <div class="dl-result-box">
                 <div class="dl-head">
@@ -399,20 +450,13 @@ async function downloadVideoNoAudio() {
                 </div>
                 <div class="dl-ready-note">
                     <i class="fas fa-check-circle"></i>
-                    <span>Silent video ready! Click Download below to save file to your device.</span>
+                    <span>Ready to download. Click below to start saving the file to your device.</span>
                 </div>
+                <div id="noaudioErrorBox" class="dl-error-box" style="display:none;"></div>
                 <div class="dl-download-actions">
-                    <button id="mainSilentDlBtn" class="dl-btn-main" onclick="downloadDirectBlobFile('${videoID}', 'videoonly', '${quality}', '${escapeHtml(filename)}', 'mainSilentDlBtn')">
+                    <button id="mainSilentDlBtn" class="dl-btn-main" onclick="executeProductionDownload('${videoID}', 'videoonly', '${quality}', '${escapeHtml(filename)}', 'mainSilentDlBtn', 'noaudioErrorBox')">
                         <i class="fas fa-download"></i> Download Silent Video (${quality}p)
                     </button>
-                    <div class="dl-servers-grid">
-                        <button id="server2SilentBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'videoonly', '720', '${escapeHtml(filename)}', 'server2SilentBtn')">
-                            <i class="fas fa-bolt"></i> Fast Server 2
-                        </button>
-                        <button id="server3SilentBtn" class="dl-btn-server" onclick="downloadDirectBlobFile('${videoID}', 'videoonly', '480', '${escapeHtml(filename)}', 'server3SilentBtn')">
-                            <i class="fas fa-server"></i> Fast Server 3
-                        </button>
-                    </div>
                 </div>
             </div>
         `;
