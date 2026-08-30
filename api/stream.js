@@ -79,24 +79,27 @@ module.exports = async (req, res) => {
   const tierErrors = [];
 
   // ----------------------------------------------------
-  // TIER 1 (PRIMARY): youtubei.js (ANDROID / TV_EMBEDDED context without cookies)
+  // TIER 1 (PRIMARY): youtubei.js (ANDROID & TV_EMBEDDED detailed per-client diagnostic)
   // ----------------------------------------------------
   try {
     const { ClientType } = await import('youtubei.js');
-    const clientCandidates = [ClientType.ANDROID, ClientType.TV_EMBEDDED];
+    const clientCandidates = [
+      { name: 'ANDROID', type: ClientType.ANDROID },
+      { name: 'TV_EMBEDDED', type: ClientType.TV_EMBEDDED }
+    ];
 
-    for (const clientType of clientCandidates) {
+    for (const { name, type: clientType } of clientCandidates) {
       try {
-        console.log(`[API /stream] Tier 1: Trying youtubei.js with ${clientType} context...`);
+        console.log(`[API /stream] Tier 1: Trying youtubei.js with ${name} context...`);
         const yt = await getInnertube(clientType);
         const info = await yt.getBasicInfo(videoID);
 
-        if (!info) throw new Error('Empty response from Innertube');
+        if (!info) throw new Error('Empty response object from Innertube');
 
         const streamingData = info.streaming_data;
         if (!streamingData) {
           const status = info.playability_status?.status || 'UNKNOWN';
-          const reason = info.playability_status?.reason || 'No streaming data';
+          const reason = info.playability_status?.reason || 'No streaming data returned by YouTube';
           throw new Error(`Streaming data unavailable (${status}: ${reason})`);
         }
 
@@ -105,35 +108,35 @@ module.exports = async (req, res) => {
           ...(Array.isArray(streamingData.adaptive_formats) ? streamingData.adaptive_formats : [])
         ];
 
-        if (formats.length === 0) throw new Error('Formats array is empty');
+        if (formats.length === 0) throw new Error('Streaming data formats array is empty');
 
         const targetFormat = type === 'audio'
           ? formats.find(f => f?.has_audio && !f?.has_video) || formats.find(f => f?.has_audio)
           : formats.find(f => f?.has_video && f?.has_audio) || formats.find(f => f?.has_video);
 
-        if (targetFormat) {
-          console.log(`[API /stream] Tier 1 SUCCESS (${clientType}): Format itag ${targetFormat.itag}`);
-          return res.status(200).json({
-            success: true,
-            title: info.basic_info?.title || 'YouTube Video',
-            author: info.basic_info?.author || 'YouTube Creator',
-            duration: info.basic_info?.duration || 0,
-            format: {
-              itag: targetFormat.itag,
-              mimeType: targetFormat.mime_type || targetFormat.mimeType,
-              quality: targetFormat.quality_label || targetFormat.quality || 'Audio'
-            },
-            provider: `youtubei.js-${clientType.toLowerCase()}`
-          });
-        }
+        if (!targetFormat) throw new Error(`No matching format found for requested type: ${type}`);
+
+        console.log(`[API /stream] Tier 1 SUCCESS (${name}): Format itag ${targetFormat.itag}`);
+        return res.status(200).json({
+          success: true,
+          title: info.basic_info?.title || 'YouTube Video',
+          author: info.basic_info?.author || 'YouTube Creator',
+          duration: info.basic_info?.duration || 0,
+          format: {
+            itag: targetFormat.itag,
+            mimeType: targetFormat.mime_type || targetFormat.mimeType,
+            quality: targetFormat.quality_label || targetFormat.quality || 'Audio'
+          },
+          provider: `youtubei.js-${name.toLowerCase()}`
+        });
       } catch (clientErr) {
-        console.warn(`[API /stream] Tier 1 (${clientType}) probe failed: ${clientErr.message}`);
+        console.error(`[API /stream] Tier 1 (${name}) RAW ERROR:`, clientErr);
+        tierErrors.push({ tier: `youtubei.js-${name.toLowerCase()}`, message: clientErr.message });
       }
     }
-    throw new Error('youtubei.js failed on both ANDROID and TV_EMBEDDED clients.');
-  } catch (t1Err) {
-    console.error('[API /stream] Tier 1 RAW ERROR:', t1Err.message);
-    tierErrors.push({ tier: 'youtubei.js', message: t1Err.message });
+  } catch (t1InitErr) {
+    console.error('[API /stream] Tier 1 Initialization RAW ERROR:', t1InitErr);
+    tierErrors.push({ tier: 'youtubei.js-init', message: t1InitErr.message });
   }
 
   // ----------------------------------------------------

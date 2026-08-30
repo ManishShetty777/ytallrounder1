@@ -84,24 +84,27 @@ module.exports = async (req, res) => {
   const tierErrors = [];
 
   // ----------------------------------------------------
-  // TIER 1 (PRIMARY): youtubei.js (ANDROID / TV_EMBEDDED context without cookies)
+  // TIER 1 (PRIMARY): youtubei.js (ANDROID & TV_EMBEDDED detailed per-client diagnostic)
   // ----------------------------------------------------
   try {
     const { ClientType } = await import('youtubei.js');
-    const clientCandidates = [ClientType.ANDROID, ClientType.TV_EMBEDDED];
+    const clientCandidates = [
+      { name: 'ANDROID', type: ClientType.ANDROID },
+      { name: 'TV_EMBEDDED', type: ClientType.TV_EMBEDDED }
+    ];
 
-    for (const clientType of clientCandidates) {
+    for (const { name, type: clientType } of clientCandidates) {
       try {
-        console.log(`[API /download] Tier 1: Trying youtubei.js with ${clientType} context...`);
+        console.log(`[API /download] Tier 1: Trying youtubei.js with ${name} context...`);
         const yt = await getInnertube(clientType);
         const info = await yt.getBasicInfo(videoID);
 
-        if (!info) throw new Error('Empty response from Innertube');
+        if (!info) throw new Error('Empty response object from Innertube');
 
         const streamingData = info.streaming_data;
         if (!streamingData) {
           const status = info.playability_status?.status || 'UNKNOWN';
-          const reason = info.playability_status?.reason || 'No streaming data';
+          const reason = info.playability_status?.reason || 'No streaming data returned by YouTube';
           throw new Error(`Streaming data unavailable (${status}: ${reason})`);
         }
 
@@ -110,45 +113,47 @@ module.exports = async (req, res) => {
           ...(Array.isArray(streamingData.adaptive_formats) ? streamingData.adaptive_formats : [])
         ];
 
-        if (formats.length === 0) throw new Error('Formats array is empty');
+        if (formats.length === 0) throw new Error('Streaming data formats array is empty');
 
         const targetFormat = type === 'audio'
           ? formats.find(f => f?.has_audio && !f?.has_video) || formats.find(f => f?.has_audio)
           : formats.find(f => f?.has_video && f?.has_audio) || formats.find(f => f?.has_video);
 
-        if (targetFormat) {
-          let resolvedUrl = targetFormat.url;
-          if (!resolvedUrl && typeof targetFormat.decipher === 'function') {
-            try {
-              resolvedUrl = await targetFormat.decipher(yt.session.player);
-            } catch (dErr) {
-              console.warn(`[API /download] Tier 1 decipher warning: ${dErr.message}`);
-            }
-          }
+        if (!targetFormat) throw new Error(`No matching format found for requested type: ${type}`);
 
-          if (resolvedUrl && typeof resolvedUrl === 'string') {
-            console.log(`[API /download] Tier 1 SUCCESS (${clientType}): itag ${targetFormat.itag}`);
-            return res.status(200).json({
-              success: true,
-              downloadUrl: resolvedUrl,
-              filename,
-              mimeType,
-              format: {
-                itag: targetFormat.itag,
-                quality: targetFormat.quality_label || targetFormat.quality || 'Audio'
-              },
-              provider: `youtubei.js-${clientType.toLowerCase()}`
-            });
+        let resolvedUrl = targetFormat.url;
+        if (!resolvedUrl && typeof targetFormat.decipher === 'function') {
+          try {
+            resolvedUrl = await targetFormat.decipher(yt.session.player);
+          } catch (dErr) {
+            console.warn(`[API /download] Tier 1 (${name}) decipher warning: ${dErr.message}`);
           }
         }
+
+        if (!resolvedUrl || typeof resolvedUrl !== 'string') {
+          throw new Error(`Format itag ${targetFormat.itag} has no valid direct stream URL or signature cipher decipher failed`);
+        }
+
+        console.log(`[API /download] Tier 1 SUCCESS (${name}): itag ${targetFormat.itag}`);
+        return res.status(200).json({
+          success: true,
+          downloadUrl: resolvedUrl,
+          filename,
+          mimeType,
+          format: {
+            itag: targetFormat.itag,
+            quality: targetFormat.quality_label || targetFormat.quality || 'Audio'
+          },
+          provider: `youtubei.js-${name.toLowerCase()}`
+        });
       } catch (clientErr) {
-        console.warn(`[API /download] Tier 1 (${clientType}) attempt failed: ${clientErr.message}`);
+        console.error(`[API /download] Tier 1 (${name}) RAW ERROR:`, clientErr);
+        tierErrors.push({ tier: `youtubei.js-${name.toLowerCase()}`, message: clientErr.message });
       }
     }
-    throw new Error('youtubei.js failed to resolve a playable direct URL on both ANDROID and TV_EMBEDDED clients.');
-  } catch (t1Err) {
-    console.error('[API /download] Tier 1 RAW ERROR:', t1Err.message);
-    tierErrors.push({ tier: 'youtubei.js', message: t1Err.message });
+  } catch (t1InitErr) {
+    console.error('[API /download] Tier 1 Initialization RAW ERROR:', t1InitErr);
+    tierErrors.push({ tier: 'youtubei.js-init', message: t1InitErr.message });
   }
 
   // ----------------------------------------------------
