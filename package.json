@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "YouTube All-Rounder - Free YouTube Tools",
   "dependencies": {
-    "@distube/ytdl-core": "^4.15.1"
+    "@distube/ytdl-core": "^4.15.1",
+    "youtubei.js": "^18.0.0"
   }
 }

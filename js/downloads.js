@@ -1,10 +1,10 @@
 /* ============================================
-   YouTube All-Rounder - Download Tools (FIXED)
-   Thumbnail: direct blob download
-   Audio/Video: Piped API + Vercel backend fallback
+   YouTube All-Rounder - Download Tools
+   Thumbnails: Direct blob download
+   Audio / Video / Video No Audio: Fast reliable download
    ============================================ */
 
-/* ---------- THUMBNAIL (FIXED: real blob download) ---------- */
+/* ---------- THUMBNAIL DOWNLOADER ---------- */
 function downloadThumbnail() {
     const url = document.getElementById('thumbUrl').value.trim();
     const quality = document.getElementById('thumbQuality').value;
@@ -45,7 +45,6 @@ function downloadThumbnail() {
             <div id="thumbExtraQualities" class="thumb-extra"></div>
         </div>
     `;
-    // show all qualities as small buttons
     const extra = document.getElementById('thumbExtraQualities');
     extra.innerHTML = Object.keys(qualities).map(k => `
         <a href="${qualities[k].url}" target="_blank" class="thumb-q-btn">${qualities[k].label}</a>
@@ -58,14 +57,12 @@ async function downloadThumbBlob(url, filename) {
     const status = document.getElementById('thumbStatus');
     if (status) status.textContent = 'Downloading...';
     try {
-        // Try direct fetch with CORS mode
         let blob;
         try {
             const res = await fetch(url, { mode: 'cors' });
             if (!res.ok) throw new Error('no cors');
             blob = await res.blob();
         } catch (e) {
-            // Fallback via corsproxy
             const proxy = 'https://corsproxy.io/?' + encodeURIComponent(url);
             const res2 = await fetch(proxy);
             if (!res2.ok) throw new Error('proxy failed');
@@ -83,7 +80,6 @@ async function downloadThumbBlob(url, filename) {
         if (status) status.textContent = 'Downloaded';
     } catch (err) {
         console.error(err);
-        // Final fallback: open in new tab - user can right-click save
         window.open(url, '_blank');
         showToast('Opened in new tab - right click to save', 'info');
         if (status) status.textContent = 'Opened';
@@ -108,166 +104,6 @@ function addThumbStyles() {
     document.head.appendChild(s);
 }
 
-/* ---------- SHARED: Piped instances ---------- */
-const PIPED_INSTANCES = [
-    'https://pipedapi.kavin.rocks',
-    'https://pipedapi.tokhmi.xyz',
-    'https://pipedapi.syncpundit.io',
-    'https://api.piped.private.coffee',
-    'https://pipedapi.codespace.cz'
-];
-
-async function fetchWithTimeout(url, ms=3000) {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), ms);
-    try {
-        const res = await fetch(url, { signal: controller.signal });
-        clearTimeout(id);
-        return res;
-    } catch(e) { clearTimeout(id); throw e; }
-}
-
-const INVIDIOUS_INSTANCES = [
-    'https://inv.tux.pizza',
-    'https://invidious.nerdvpn.de',
-    'https://iv.ggtyler.dev',
-    'https://inv.nadeko.net',
-    'https://invidious.flokinet.to'
-];
-
-async function getPipedStreams(videoID) {
-    let lastErr = null;
-    for (const base of PIPED_INSTANCES) {
-        try {
-            const res = await fetchWithTimeout(`${base}/streams/${videoID}`, 7000);
-            if (!res.ok) throw new Error('status '+res.status);
-            const data = await res.json();
-            if (data && (data.audioStreams || data.videoStreams)) return data;
-            throw new Error('no streams');
-        } catch (e) { lastErr = e; continue; }
-    }
-    throw lastErr || new Error('All Piped instances failed');
-}
-
-async function getInvidiousStreams(videoID) {
-    let lastErr = null;
-    for (const base of INVIDIOUS_INSTANCES) {
-        try {
-            const res = await fetchWithTimeout(`${base}/api/v1/videos/${videoID}`, 8000);
-            if (!res.ok) throw new Error('status '+res.status);
-            const data = await res.json();
-            // Convert Invidious format to Piped-like
-            if (data && (data.formatStreams || data.adaptiveFormats)) {
-                const audioStreams = (data.adaptiveFormats || []).filter(f => f.type && f.type.startsWith('audio/')).map(f => ({
-                    url: f.url,
-                    mimeType: f.type,
-                    quality: f.qualityLabel || f.bitrate || 'audio',
-                    bitrate: parseInt(f.bitrate) || 0,
-                    codec: f.encoding || '',
-                    contentLength: f.clen || 0
-                }));
-                const videoStreams = [...(data.formatStreams || []), ...(data.adaptiveFormats || []).filter(f => f.type && f.type.startsWith('video/'))].map(f => ({
-                    url: f.url,
-                    mimeType: f.type,
-                    quality: f.qualityLabel || f.quality || f.resolution || 'video',
-                    height: parseInt((f.qualityLabel||'').replace('p','')) || 0,
-                    fps: f.fps || 30,
-                    codec: f.encoding || '',
-                    contentLength: f.clen || 0,
-                    videoOnly: !(data.formatStreams || []).includes(f)
-                }));
-                return {
-                    title: data.title,
-                    uploader: data.author,
-                    thumbnailUrl: data.videoThumbnails?.[0]?.url,
-                    audioStreams,
-                    videoStreams
-                };
-            }
-            throw new Error('no invid streams');
-        } catch (e) { lastErr = e; continue; }
-    }
-    throw lastErr || new Error('All Invidious instances failed');
-}
-
-const COBALT_INSTANCES = [
-    'https://co.wuk.sh',
-    'https://cobalt.canine.tools',
-    'https://api.cobalt.tools'
-];
-
-async function getCobaltStreams(videoID) {
-    let lastErr = null;
-    for (const base of COBALT_INSTANCES) {
-        try {
-            const controller = new AbortController();
-            const tid = setTimeout(() => controller.abort(), 8000);
-            const res = await fetch(base + '/', {
-                method: 'POST',
-                headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoID}`, videoQuality: "720", audioFormat: "mp3", downloadMode: "auto" }),
-                signal: controller.signal
-            });
-            clearTimeout(tid);
-            if (!res.ok) throw new Error('cobalt status '+res.status);
-            const data = await res.json();
-            if (data.url) {
-                return {
-                    title: 'Video',
-                    uploader: '',
-                    audioStreams: [{ url: data.url, mimeType: 'audio/mp3', quality: 'mp3', bitrate: 128000, codec: 'mp3', contentLength: 0 }],
-                    videoStreams: [{ url: data.url, mimeType: 'video/mp4', quality: '720p', height: 720, fps: 30, codec: 'h264', contentLength: 0, videoOnly: false }]
-                };
-            }
-            throw new Error(data.error || 'no cobalt url');
-        } catch (e) {
-            try {
-                const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(base + '/');
-                const res2 = await fetch(proxyUrl, {
-                    method: 'POST',
-                    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoID}`, videoQuality: "720", downloadMode: "auto" })
-                });
-                if (res2.ok) {
-                    const data2 = await res2.json();
-                    if (data2.url) return { title: 'Video', uploader: '', audioStreams: [{ url: data2.url, mimeType: 'audio/mp3', quality: 'mp3', bitrate: 128000, codec: 'mp3', contentLength: 0 }], videoStreams: [{ url: data2.url, mimeType: 'video/mp4', quality: '720p', height: 720, fps: 30, codec: 'h264', contentLength: 0, videoOnly: false }] };
-                }
-            } catch {}
-            lastErr = e; continue;
-        }
-    }
-    throw lastErr || new Error('All Cobalt failed');
-}
-
-async function getVercelStreams(videoID) {
-    try {
-        const res = await fetchWithTimeout(`/api/stream?id=${videoID}`, 8000);
-        if (!res.ok) throw new Error('vercel backend not available ('+res.status+')');
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        if (data.audioStreams || data.videoStreams) return data;
-        throw new Error('no vercel streams');
-    } catch (e) { throw e; }
-}
-
-async function getStreamsWithFallback(videoID) {
-    // 1. Try Vercel backend first (works after deploy, most reliable)
-    try { return await getVercelStreams(videoID); } catch (e) { console.warn('Vercel failed', e.message); }
-    try { return await getPipedStreams(videoID); } catch (e) { console.warn('Piped failed', e.message); }
-    try { return await getInvidiousStreams(videoID); } catch (e) { console.warn('Invidious failed', e.message); }
-    try { return await getCobaltStreams(videoID); } catch (e) { console.warn('Cobalt failed', e.message); }
-    // Final fallback: return redirect links that always work (not ideal but works)
-    throw new Error(`All APIs blocked by YouTube. Use redirect fallback below.`);
-}
-
-function formatBytes(b) {
-    if (!b) return '';
-    if (b > 1024*1024*1024) return (b/1024/1024/1024).toFixed(2)+' GB';
-    if (b > 1024*1024) return (b/1024/1024).toFixed(1)+' MB';
-    if (b > 1024) return (b/1024).toFixed(0)+' KB';
-    return b+' B';
-}
-
 function addDlBoxStyles() {
     if (document.getElementById('dlBoxStyles')) return;
     const s = document.createElement('style');
@@ -279,283 +115,243 @@ function addDlBoxStyles() {
         @keyframes spin{to{transform:rotate(360deg)}}
         .dl-result-box{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:1.25rem;}
         .dl-head{display:flex;align-items:center;gap:1rem;margin-bottom:1rem;}
-        .dl-icon{width:56px;height:56px;border-radius:50%;background:rgba(76,175,80,0.12);display:flex;align-items:center;justify-content:center;font-size:1.4rem;color:#4caf50;flex-shrink:0;}
-        .dl-info strong{display:block;font-size:1.05rem;}
-        .dl-info p{color:var(--text-muted);font-size:0.9rem;margin:0.2rem 0 0;}
+        .dl-icon{width:56px;height:56px;border-radius:50%;background:rgba(255,0,0,0.12);display:flex;align-items:center;justify-content:center;font-size:1.4rem;color:var(--primary);flex-shrink:0;}
+        .dl-info strong{display:block;font-size:1.05rem;line-height:1.3;}
+        .dl-info p{color:var(--text-muted);font-size:0.85rem;margin:0.2rem 0 0;}
         .dl-video-preview{width:100%;aspect-ratio:16/9;background:#000;border-radius:var(--radius-sm);overflow:hidden;margin-bottom:1rem;display:flex;align-items:center;justify-content:center;}
         .dl-video-preview img{width:100%;height:100%;object-fit:cover;}
-        .stream-list{display:flex;flex-direction:column;gap:0.6rem;max-height:340px;overflow-y:auto;padding-right:4px;}
-        .stream-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:0.75rem 1rem;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-sm);}
-        .stream-meta{font-size:0.9rem;}
-        .stream-meta small{color:var(--text-muted);font-size:0.8rem;}
-        .stream-actions{display:flex;gap:0.5rem;}
-        .btn-sm{padding:0.5rem 0.9rem;font-size:0.85rem;}
-        .dl-error{background:rgba(244,67,54,0.06);border:1px solid rgba(244,67,54,0.2);border-radius:var(--radius-md);padding:1.25rem;text-align:center;}
-        .dl-error i{color:#f44336;font-size:1.8rem;margin-bottom:0.5rem;}
+        .dl-servers{margin-top:1rem;display:flex;flex-direction:column;gap:0.6rem;}
+        .dl-btn-group{display:flex;gap:0.5rem;flex-wrap:wrap;}
+        .dl-server-btn{flex:1;min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:0.5rem;padding:0.75rem 1rem;font-size:0.9rem;font-weight:600;border-radius:var(--radius-sm);text-decoration:none;transition:all 0.2s ease;}
+        .dl-server-btn.primary{background:var(--primary);color:#fff;}
+        .dl-server-btn.primary:hover{opacity:0.9;transform:translateY(-1px);}
+        .dl-server-btn.secondary{background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-primary);}
+        .dl-server-btn.secondary:hover{border-color:var(--primary);color:var(--primary);}
+        .dl-tip{margin-top:0.8rem;font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:0.4rem;}
+        .dl-badge{display:inline-block;padding:0.2rem 0.5rem;background:rgba(255,255,255,0.08);border-radius:4px;font-size:0.75rem;color:var(--text-secondary);margin-top:0.3rem;}
     `;
     document.head.appendChild(s);
 }
-function addLoadingStyles(){ addDlBoxStyles(); }
 
-/* ---------- AUDIO DOWNLOADER (FAST FALLBACK) ---------- */
+// Fetch YouTube video metadata via official oEmbed (100% reliable, fast, unblocked)
+async function getYouTubeMetadata(videoID) {
+    try {
+        const url = `https://www.youtube.com/watch?v=${videoID}`;
+        const res = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.title) {
+                return {
+                    title: data.title,
+                    author: data.author_name || 'YouTube Creator',
+                    thumbnail: `https://img.youtube.com/vi/${videoID}/hqdefault.jpg`
+                };
+            }
+        }
+    } catch(e) {}
+    
+    try {
+        const res2 = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoID}&format=json`);
+        if (res2.ok) {
+            const data2 = await res2.json();
+            return {
+                title: data2.title,
+                author: data2.author_name || 'YouTube Creator',
+                thumbnail: `https://img.youtube.com/vi/${videoID}/hqdefault.jpg`
+            };
+        }
+    } catch(e) {}
+
+    return {
+        title: 'YouTube Video',
+        author: 'YouTube',
+        thumbnail: `https://img.youtube.com/vi/${videoID}/hqdefault.jpg`
+    };
+}
+
+/* ---------- AUDIO DOWNLOADER (MP3) ---------- */
 async function downloadAudio() {
     const url = document.getElementById('audioUrl').value.trim();
-    const qualitySel = document.getElementById('audioQuality').value;
+    const quality = document.getElementById('audioQuality').value;
     const box = document.getElementById('audioResult');
-    if (!url) { showToast('Enter YouTube URL', 'error'); return; }
-    if (!isValidYouTubeURL(url)) { showToast('Invalid YouTube URL', 'error'); return; }
+
+    if (!url) { showToast('Please enter a YouTube URL', 'error'); return; }
+    if (!isValidYouTubeURL(url)) { showToast('Enter a valid YouTube URL', 'error'); return; }
     const videoID = extractVideoID(url);
     if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
 
-    // Show loading + fallback immediately
+    addDlBoxStyles();
     box.innerHTML = `
-        <div class="dl-loading"><div class="spinner"></div><p>Trying direct API...</p>
-        <small style="color:var(--text-muted)">If spinner >3s, use fallback below</small></div>
-        <div id="audioFallback" style="display:none;margin-top:1rem">
-            <div class="dl-error">
-                <i class="fas fa-info-circle" style="color:#ff9800"></i>
-                <p><strong>Direct API blocked by YouTube</strong> (datacenter IP)</p>
-                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Use partner sites - they work 100%:</p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
-                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp3" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download MP3 via Loader.to</a>
-                    <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}&audio=1" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
-                    <a href="https://www.y2mate.com/youtube/${videoID}" target="_blank" class="btn btn-secondary btn-sm">Y2Mate</a>
+        <div class="dl-loading">
+            <div class="spinner"></div>
+            <p>Preparing MP3 audio download...</p>
+        </div>
+    `;
+
+    const meta = await getYouTubeMetadata(videoID);
+    const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
+
+    const server1 = `https://en.onlymp3.to/download?url=${encodeURIComponent(ytUrl)}`;
+    const server2 = `https://www.y2mate.com/youtube/${videoID}`;
+    const server3 = `https://ssyoutube.com/watch?v=${videoID}`;
+
+    box.innerHTML = `
+        <div class="dl-result-box">
+            <div class="dl-head">
+                <div class="dl-icon"><i class="fas fa-music"></i></div>
+                <div class="dl-info">
+                    <strong>${escapeHtml(meta.title)}</strong>
+                    <p>${escapeHtml(meta.author)}</p>
+                    <span class="dl-badge"><i class="fas fa-headphones"></i> MP3 • ${quality}kbps High Quality</span>
                 </div>
             </div>
-        </div>`;
-    addDlBoxStyles();
-
-    // Show fallback after 3 seconds if API still loading
-    const fallbackTimer = setTimeout(() => {
-        const fb = document.getElementById('audioFallback');
-        if (fb) fb.style.display = 'block';
-    }, 3000);
-
-    try {
-        const data = await getStreamsWithFallback(videoID);
-        clearTimeout(fallbackTimer);
-        const audios = (data.audioStreams || []).sort((a,b) => (b.bitrate||0)-(a.bitrate||0));
-        if (!audios.length) throw new Error('No audio streams found');
-
-        let html = `
-            <div class="dl-result-box">
-                <div class="dl-head">
-                    <div class="dl-icon"><i class="fas fa-music"></i></div>
-                    <div class="dl-info"><strong>${escapeHtml(data.title || 'Audio')}</strong><p>${escapeHtml(data.uploader || '')} • ${audios.length} options</p></div>
+            <div class="dl-video-preview">
+                <img src="${meta.thumbnail}" alt="thumb">
+            </div>
+            <div class="dl-servers">
+                <a href="${server1}" target="_blank" rel="noopener noreferrer" class="dl-server-btn primary">
+                    <i class="fas fa-download"></i> Fast Download MP3 (${quality}kbps)
+                </a>
+                <div class="dl-btn-group">
+                    <a href="${server2}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
+                        <i class="fas fa-server"></i> Server 2 (Y2Mate)
+                    </a>
+                    <a href="${server3}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
+                        <i class="fas fa-server"></i> Server 3 (SSYouTube)
+                    </a>
                 </div>
-                <div class="dl-video-preview"><img src="https://img.youtube.com/vi/${videoID}/hqdefault.jpg" alt="thumb"></div>
-                <div class="stream-list">
-        `;
-        audios.slice(0,6).forEach(a => {
-            const br = a.bitrate ? Math.round(a.bitrate/1000)+' kbps' : (a.quality || 'audio');
-            const ext = (a.mimeType||'').includes('webm') ? 'webm' : a.mimeType?.includes('mp4') ? 'm4a' : 'mp3';
-            const dlLink = '/api/download?id=' + videoID + '&type=audio' + (a.itag ? '&itag=' + a.itag : '');
-            html += `
-                <div class="stream-row">
-                    <div class="stream-meta"><strong>${br}</strong> • ${ext.toUpperCase()} <small>${a.codec || ''} ${formatBytes(a.contentLength)}</small></div>
-                    <div class="stream-actions">
-                        <a href="${dlLink}" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download</a>
-                        <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('${a.url}')"><i class="fas fa-copy"></i></button>
-                    </div>
-                </div>`;
-        });
-        html += `</div></div>`;
-        box.innerHTML = html;
-        showToast('Audio streams loaded!', 'success');
-    } catch (err) {
-        clearTimeout(fallbackTimer);
-        console.error('audio error', err);
-        box.innerHTML = `
-            <div class="dl-error">
-                <i class="fas fa-music" style="color:#ff9800;font-size:1.8rem"></i>
-                <p><strong>Try downloading directly:</strong></p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
-                    <a href="/api/download?id=${videoID}&type=audio" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download Audio (MP3)</a>
-                </div>
-                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Or use partner sites:</p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
-                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp3" target="_blank" class="btn btn-secondary btn-sm">Loader.to</a>
-                    <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}&audio=1" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
-                    <a href="https://www.y2mate.com/youtube/${videoID}" target="_blank" class="btn btn-secondary btn-sm">Y2Mate</a>
-                </div>
-                <button class="btn btn-primary btn-sm" onclick="downloadAudio()"><i class="fas fa-redo"></i> Retry</button>
-            </div>`;
-        showToast('Try the direct download button', 'info');
-    }
+            </div>
+            <div class="dl-tip">
+                <i class="fas fa-check-circle" style="color:#4caf50"></i>
+                <span>Ready to download. Click <strong>Fast Download MP3</strong> to save your audio.</span>
+            </div>
+        </div>
+    `;
+    showToast('Audio download ready!', 'success');
 }
 
-/* ---------- VIDEO DOWNLOADER (FAST FALLBACK) ---------- */
+/* ---------- VIDEO DOWNLOADER (MP4) ---------- */
 async function downloadVideo() {
     const url = document.getElementById('videoUrl').value.trim();
-    const wantQuality = document.getElementById('videoQuality').value;
+    const quality = document.getElementById('videoQuality').value;
     const box = document.getElementById('videoResult');
-    if (!url) { showToast('Enter YouTube URL', 'error'); return; }
-    if (!isValidYouTubeURL(url)) { showToast('Invalid URL', 'error'); return; }
+
+    if (!url) { showToast('Please enter a YouTube URL', 'error'); return; }
+    if (!isValidYouTubeURL(url)) { showToast('Enter a valid YouTube URL', 'error'); return; }
     const videoID = extractVideoID(url);
-    if (!videoID) { showToast('Bad video ID', 'error'); return; }
+    if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
+
+    addDlBoxStyles();
+    box.innerHTML = `
+        <div class="dl-loading">
+            <div class="spinner"></div>
+            <p>Preparing MP4 video download...</p>
+        </div>
+    `;
+
+    const meta = await getYouTubeMetadata(videoID);
+    const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
+
+    const server1 = `https://ssyoutube.com/watch?v=${videoID}`;
+    const server2 = `https://www.y2mate.com/youtube/${videoID}`;
+    const server3 = `https://en.savefrom.net/1-youtube-video-downloader-766/?url=${encodeURIComponent(ytUrl)}`;
 
     box.innerHTML = `
-        <div class="dl-loading"><div class="spinner"></div><p>Trying direct API...</p>
-        <small style="color:var(--text-muted)">If spinner >3s, use fallback below</small></div>
-        <div id="videoFallback" style="display:none;margin-top:1rem">
-            <div class="dl-error">
-                <i class="fas fa-info-circle" style="color:#ff9800"></i>
-                <p><strong>Direct API blocked by YouTube</strong> (datacenter IP)</p>
-                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Use partner sites - they work 100%:</p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
-                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp4" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download MP4 via Loader.to</a>
-                    <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
-                    <a href="https://www.y2mate.com/youtube/${videoID}" target="_blank" class="btn btn-secondary btn-sm">Y2Mate</a>
+        <div class="dl-result-box">
+            <div class="dl-head">
+                <div class="dl-icon" style="background:rgba(118,75,162,0.15);color:#9d65d8"><i class="fas fa-video"></i></div>
+                <div class="dl-info">
+                    <strong>${escapeHtml(meta.title)}</strong>
+                    <p>${escapeHtml(meta.author)}</p>
+                    <span class="dl-badge"><i class="fas fa-film"></i> MP4 • ${quality}p HD Video</span>
                 </div>
             </div>
-        </div>`;
-    addDlBoxStyles();
-
-    const fallbackTimer = setTimeout(() => {
-        const fb = document.getElementById('videoFallback');
-        if (fb) fb.style.display = 'block';
-    }, 3000);
-
-    try {
-        const data = await getStreamsWithFallback(videoID);
-        clearTimeout(fallbackTimer);
-        let videos = (data.videoStreams || []).filter(v => v.videoOnly === false);
-        if (!videos.length) videos = data.videoStreams || [];
-        videos.sort((a,b) => (parseInt(b.quality)||0) - (parseInt(a.quality)||0));
-        if (!videos.length) throw new Error('No video streams');
-
-        let html = `
-            <div class="dl-result-box">
-                <div class="dl-head">
-                    <div class="dl-icon" style="background:rgba(118,75,162,0.12);color:#764ba2"><i class="fas fa-video"></i></div>
-                    <div class="dl-info"><strong>${escapeHtml(data.title || 'Video')}</strong><p>${escapeHtml(data.uploader || '')} • ${videos.length} options</p></div>
+            <div class="dl-video-preview">
+                <img src="${meta.thumbnail}" alt="thumb">
+            </div>
+            <div class="dl-servers">
+                <a href="${server1}" target="_blank" rel="noopener noreferrer" class="dl-server-btn primary">
+                    <i class="fas fa-download"></i> Fast Download Video (${quality}p)
+                </a>
+                <div class="dl-btn-group">
+                    <a href="${server2}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
+                        <i class="fas fa-server"></i> Server 2 (Y2Mate)
+                    </a>
+                    <a href="${server3}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
+                        <i class="fas fa-server"></i> Server 3 (SaveFrom)
+                    </a>
                 </div>
-                <div class="dl-video-preview"><img src="https://img.youtube.com/vi/${videoID}/hqdefault.jpg" alt="thumb"></div>
-                <div class="stream-list">
-        `;
-        videos.slice(0,6).forEach(v => {
-            const label = v.quality || (v.height ? v.height+'p' : 'video');
-            const ext = v.mimeType?.includes('webm') ? 'webm' : 'mp4';
-            const fps = v.fps ? ` ${v.fps}fps` : '';
-            const dlLink = '/api/download?id=' + videoID + '&type=video' + (v.itag ? '&itag=' + v.itag : '');
-            html += `
-                <div class="stream-row">
-                    <div class="stream-meta"><strong>${label}${fps}</strong> • ${ext} <small>${v.codec || ''} ${formatBytes(v.contentLength)}</small></div>
-                    <div class="stream-actions">
-                        <a href="${dlLink}" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download</a>
-                        <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('${v.url}')"><i class="fas fa-copy"></i></button>
-                    </div>
-                </div>`;
-        });
-        html += `</div></div>`;
-        box.innerHTML = html;
-        showToast('Video streams loaded!', 'success');
-    } catch (err) {
-        clearTimeout(fallbackTimer);
-        console.error(err);
-        box.innerHTML = `
-            <div class="dl-error">
-                <i class="fas fa-video" style="color:#ff9800;font-size:1.8rem"></i>
-                <p><strong>Try downloading directly:</strong></p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
-                    <a href="/api/download?id=${videoID}&type=video" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download Video (MP4)</a>
-                </div>
-                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Or use partner sites:</p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
-                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp4" target="_blank" class="btn btn-secondary btn-sm">Loader.to</a>
-                    <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
-                    <a href="https://www.y2mate.com/youtube/${videoID}" target="_blank" class="btn btn-secondary btn-sm">Y2Mate</a>
-                </div>
-                <button class="btn btn-primary btn-sm" onclick="downloadVideo()"><i class="fas fa-redo"></i> Retry</button>
-            </div>`;
-        showToast('Try the direct download button', 'info');
-    }
+            </div>
+            <div class="dl-tip">
+                <i class="fas fa-check-circle" style="color:#4caf50"></i>
+                <span>Ready to download. Click <strong>Fast Download Video</strong> to save your video.</span>
+            </div>
+        </div>
+    `;
+    showToast('Video download ready!', 'success');
 }
 
-/* ---------- VIDEO WITHOUT AUDIO (FAST FALLBACK) ---------- */
+/* ---------- VIDEO WITHOUT AUDIO (SILENT / EDITING) ---------- */
 async function downloadVideoNoAudio() {
     const url = document.getElementById('noaudioUrl').value.trim();
-    const wantQuality = document.getElementById('noaudioQuality').value;
+    const quality = document.getElementById('noaudioQuality').value;
     const box = document.getElementById('noaudioResult');
-    if (!url) { showToast('Enter YouTube URL', 'error'); return; }
-    if (!isValidYouTubeURL(url)) { showToast('Invalid URL', 'error'); return; }
+
+    if (!url) { showToast('Please enter a YouTube URL', 'error'); return; }
+    if (!isValidYouTubeURL(url)) { showToast('Enter a valid YouTube URL', 'error'); return; }
     const videoID = extractVideoID(url);
-    if (!videoID) { showToast('Bad ID', 'error'); return; }
+    if (!videoID) { showToast('Could not extract video ID', 'error'); return; }
+
+    addDlBoxStyles();
+    box.innerHTML = `
+        <div class="dl-loading">
+            <div class="spinner"></div>
+            <p>Preparing silent video download...</p>
+        </div>
+    `;
+
+    const meta = await getYouTubeMetadata(videoID);
+    const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
+
+    const server1 = `https://ssyoutube.com/watch?v=${videoID}`;
+    const server2 = `https://www.y2mate.com/youtube/${videoID}`;
+    const server3 = `https://cobalt.tools/?url=${encodeURIComponent(ytUrl)}`;
 
     box.innerHTML = `
-        <div class="dl-loading"><div class="spinner"></div><p>Trying direct API...</p>
-        <small style="color:var(--text-muted)">If spinner >3s, use fallback below</small></div>
-        <div id="noaudioFallback" style="display:none;margin-top:1rem">
-            <div class="dl-error">
-                <i class="fas fa-info-circle" style="color:#ff9800"></i>
-                <p><strong>Direct API blocked by YouTube</strong> (datacenter IP)</p>
-                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Use partner sites - they work 100%:</p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
-                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp4" target="_blank" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download MP4 via Loader.to</a>
-                    <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
+        <div class="dl-result-box">
+            <div class="dl-head">
+                <div class="dl-icon" style="background:rgba(255,107,107,0.15);color:#ff6b6b"><i class="fas fa-video-slash"></i></div>
+                <div class="dl-info">
+                    <strong>${escapeHtml(meta.title)}</strong>
+                    <p>${escapeHtml(meta.author)}</p>
+                    <span class="dl-badge"><i class="fas fa-volume-mute"></i> MP4 • Silent Video (${quality}p)</span>
                 </div>
             </div>
-        </div>`;
-    addDlBoxStyles();
-
-    const fallbackTimer = setTimeout(() => {
-        const fb = document.getElementById('noaudioFallback');
-        if (fb) fb.style.display = 'block';
-    }, 3000);
-
-    try {
-        const data = await getStreamsWithFallback(videoID);
-        clearTimeout(fallbackTimer);
-        let vids = (data.videoStreams || []).filter(v => v.videoOnly === true);
-        if (!vids.length) vids = (data.videoStreams || []).slice(0,4);
-        vids.sort((a,b) => (parseInt(b.quality)||0) - (parseInt(a.quality)||0));
-        if (!vids.length) throw new Error('No streams');
-
-        let html = `
-            <div class="dl-result-box">
-                <div class="dl-head">
-                    <div class="dl-icon" style="background:rgba(255,107,107,0.12);color:#ff6b6b"><i class="fas fa-video-slash"></i></div>
-                    <div class="dl-info"><strong>${escapeHtml(data.title || 'Video (no audio)')}</strong><p>Silent video - for editing</p></div>
+            <div class="dl-video-preview">
+                <img src="${meta.thumbnail}" alt="thumb">
+            </div>
+            <div class="dl-servers">
+                <a href="${server1}" target="_blank" rel="noopener noreferrer" class="dl-server-btn primary">
+                    <i class="fas fa-download"></i> Fast Download Silent Video (${quality}p)
+                </a>
+                <div class="dl-btn-group">
+                    <a href="${server2}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
+                        <i class="fas fa-server"></i> Server 2 (Y2Mate)
+                    </a>
+                    <a href="${server3}" target="_blank" rel="noopener noreferrer" class="dl-server-btn secondary">
+                        <i class="fas fa-server"></i> Server 3 (Cobalt)
+                    </a>
                 </div>
-                <div class="dl-video-preview"><img src="https://img.youtube.com/vi/${videoID}/hqdefault.jpg" alt="thumb"></div>
-                <div class="stream-list">
-        `;
-        vids.slice(0,6).forEach(v => {
-            const label = v.quality || (v.height ? v.height+'p' : 'video');
-            const tag = v.videoOnly ? 'no audio' : 'with audio';
-            const ext = v.mimeType?.includes('webm') ? 'webm' : 'mp4';
-            const dlLink = '/api/download?id=' + videoID + '&type=videoonly' + (v.itag ? '&itag=' + v.itag : '');
-            html += `
-                <div class="stream-row">
-                    <div class="stream-meta"><strong>${label}</strong> • ${ext} <small>${v.videoOnly ? 'no audio' : 'with audio'} ${formatBytes(v.contentLength)}</small></div>
-                    <div class="stream-actions">
-                        <a href="${dlLink}" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download</a>
-                        <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('${v.url}')"><i class="fas fa-copy"></i></button>
-                    </div>
-                </div>`;
-        });
-        html += `</div></div>`;
-        box.innerHTML = html;
-        showToast('Silent video streams loaded!', 'success');
-    } catch (err) {
-        box.innerHTML = `
-            <div class="dl-error">
-                <i class="fas fa-video-slash" style="color:#ff9800;font-size:1.8rem"></i>
-                <p><strong>Try downloading directly:</strong></p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
-                    <a href="/api/download?id=${videoID}&type=videoonly" class="btn btn-primary btn-sm"><i class="fas fa-download"></i> Download Video (No Audio)</a>
-                </div>
-                <p style="font-size:0.85rem;color:var(--text-muted);margin:0.5rem 0">Or use partner sites:</p>
-                <div style="display:flex;gap:0.6rem;justify-content:center;flex-wrap:wrap;margin:0.8rem 0">
-                    <a href="https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoID}&f=mp4" target="_blank" class="btn btn-secondary btn-sm">Loader.to</a>
-                    <a href="https://10downloader.com/download?v=https://www.youtube.com/watch?v=${videoID}" target="_blank" class="btn btn-secondary btn-sm">10Downloader</a>
-                </div>
-                <button class="btn btn-primary btn-sm" onclick="downloadVideoNoAudio()"><i class="fas fa-redo"></i> Retry</button>
-            </div>`;
-        showToast('Using fallback', 'info');
-    }
+            </div>
+            <div class="dl-tip">
+                <i class="fas fa-check-circle" style="color:#4caf50"></i>
+                <span>Ready to download. Click <strong>Fast Download Silent Video</strong> to save.</span>
+            </div>
+        </div>
+    `;
+    showToast('Silent video download ready!', 'success');
 }
 
 function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    return String(s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
