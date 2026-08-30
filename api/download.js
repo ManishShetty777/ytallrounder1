@@ -1,8 +1,7 @@
-// Vercel Serverless Function - Production Media Streaming & Download Endpoint
-// Multi-Tier Stream Pipeline: Authenticated YTDL -> Hosted Cobalt API (if configured)
+// Vercel Serverless Function - Resolve Media Stream URL Endpoint
+// Resolves the direct media URL and returns JSON { downloadUrl, filename, mimeType }
+// Avoids function timeouts by letting the client browser download directly from the resolved CDN
 
-const https = require('https');
-const http = require('http');
 const ytdl = require('@distube/ytdl-core');
 
 function parseCookies(cookieInput) {
@@ -32,63 +31,25 @@ function parseCookies(cookieInput) {
   return cookies.length > 0 ? cookies : null;
 }
 
-function streamRemoteUrl(targetUrl, res, filename, mimeType, maxRedirects = 5) {
-  if (maxRedirects <= 0) {
-    if (!res.headersSent) res.status(502).json({ error: 'Exceeded redirect limit' });
-    return;
-  }
-
-  const client = targetUrl.startsWith('https') ? https : http;
-  const req = client.get(targetUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-    }
-  }, (response) => {
-    if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-      const nextUrl = new URL(response.headers.location, targetUrl).toString();
-      response.resume();
-      return streamRemoteUrl(nextUrl, res, filename, mimeType, maxRedirects - 1);
-    }
-
-    if (response.statusCode >= 400) {
-      response.resume();
-      if (!res.headersSent) {
-        return res.status(response.statusCode).json({ error: `Upstream media returned HTTP ${response.statusCode}` });
-      }
-      return;
-    }
-
-    res.setHeader('Content-Type', mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
-    res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
-
-    if (response.headers['content-length']) {
-      res.setHeader('Content-Length', response.headers['content-length']);
-    }
-
-    response.pipe(res);
-  });
-
-  req.on('error', (e) => {
-    if (!res.headersSent) res.status(500).json({ error: 'Upstream stream error: ' + e.message });
-  });
-}
-
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition, Content-Type');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const videoID = (req.query.id || req.query.v || '').replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 11);
-  const type = req.query.type || 'audio';
+  const type = req.query.type || 'audio'; // audio | video | videoonly
   const quality = req.query.quality || (type === 'audio' ? '192' : '1080');
   const rawTitle = req.query.title || 'YouTube_Download';
 
   if (!videoID || videoID.length !== 11) {
-    return res.status(400).json({ error: 'Invalid YouTube Video ID. Must be 11 characters.', code: 400 });
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid YouTube Video ID. Must be 11 characters.',
+      code: 400
+    });
   }
 
   const cleanTitle = rawTitle.replace(/[^\w\s.-]/gi, '').trim().replace(/\s+/g, '_').substring(0, 80) || `media_${videoID}`;
@@ -97,12 +58,12 @@ module.exports = async (req, res) => {
   const filename = cleanTitle.toLowerCase().endsWith(`.${ext}`) ? cleanTitle : `${cleanTitle}.${ext}`;
 
   const ytUrl = `https://www.youtube.com/watch?v=${videoID}`;
-  console.log(`[API /download] Streaming ${videoID} (${type}, ${quality})`);
+  console.log(`[API /download] Resolving direct download URL for ${videoID} (${type}, ${quality})`);
 
   let lastError = null;
 
   // ----------------------------------------------------
-  // TIER 1: Authenticated @distube/ytdl-core (Session Cookies)
+  // TIER 1: Authenticated @distube/ytdl-core Format URL Resolution
   // ----------------------------------------------------
   try {
     const cookieEnv = process.env.YOUTUBE_COOKIE || process.env.COOKIE || '';
@@ -112,7 +73,7 @@ module.exports = async (req, res) => {
     if (parsedCookies) {
       try {
         agent = ytdl.createAgent(parsedCookies);
-        console.log(`[API /download] Tier 1: Agent created with ${parsedCookies.length} session cookies`);
+        console.log(`[API /download] Tier 1: Agent initialized with ${parsedCookies.length} session cookies`);
       } catch (agentErr) {
         console.warn('[API /download] Tier 1 agent error:', agentErr.message);
       }
@@ -133,23 +94,20 @@ module.exports = async (req, res) => {
     });
 
     const format = ytdl.chooseFormat(info.formats, { filter, quality: qualityOpt });
-    if (format) {
-      res.setHeader('Content-Type', mimeType);
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
-      res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
-
-      if (format.contentLength) {
-        res.setHeader('Content-Length', format.contentLength);
-      }
-
-      const stream = ytdl.downloadFromInfo(info, { format, agent });
-      stream.on('error', (e) => {
-        console.error('[API /download] YTDL pipe error:', e.message);
+    if (format && format.url) {
+      console.log(`[API /download] Tier 1 SUCCESS: Resolved direct URL for itag ${format.itag}`);
+      return res.status(200).json({
+        success: true,
+        downloadUrl: format.url,
+        filename,
+        mimeType,
+        format: {
+          itag: format.itag,
+          quality: format.qualityLabel || format.audioBitrate + 'kbps',
+          contentLength: format.contentLength || null
+        },
+        provider: 'ytdl-core' + (parsedCookies ? '-authenticated' : '')
       });
-      req.on('close', () => {
-        if (typeof stream.destroy === 'function') stream.destroy();
-      });
-      return stream.pipe(res);
     }
   } catch (t1Err) {
     lastError = t1Err;
@@ -157,21 +115,69 @@ module.exports = async (req, res) => {
   }
 
   // ----------------------------------------------------
-  // TIER 2: Hosted Cobalt API Pipe (Env-Var Only)
+  // TIER 2: YouTube.js Dynamic ESM Import (TV Context URL Resolution)
+  // ----------------------------------------------------
+  try {
+    const { Innertube, UniversalCache, ClientType } = await import('youtubei.js');
+    const yt = await Innertube.create({
+      cache: new UniversalCache(false),
+      client_type: ClientType.TV,
+      generate_session_locally: true,
+      retrieve_player: true
+    });
+
+    const info = await yt.getInfo(videoID);
+    const streamingData = info?.streaming_data;
+    if (streamingData) {
+      const formats = [
+        ...(Array.isArray(streamingData.formats) ? streamingData.formats : []),
+        ...(Array.isArray(streamingData.adaptive_formats) ? streamingData.adaptive_formats : [])
+      ];
+
+      const targetFormat = type === 'audio'
+        ? formats.find(f => f?.has_audio && !f?.has_video) || formats.find(f => f?.has_audio)
+        : formats.find(f => f?.has_video && f?.has_audio) || formats.find(f => f?.has_video);
+
+      if (targetFormat) {
+        let streamUrl = targetFormat.url;
+        if (!streamUrl && typeof targetFormat.decipher === 'function') {
+          try {
+            streamUrl = await targetFormat.decipher(yt.session.player);
+          } catch (dErr) {}
+        }
+
+        if (streamUrl && typeof streamUrl === 'string') {
+          console.log(`[API /download] Tier 2 SUCCESS: Resolved Innertube URL for itag ${targetFormat.itag}`);
+          return res.status(200).json({
+            success: true,
+            downloadUrl: streamUrl,
+            filename,
+            mimeType,
+            format: {
+              itag: targetFormat.itag,
+              quality: targetFormat.quality_label || targetFormat.quality || 'Audio'
+            },
+            provider: 'youtubei.js-tv'
+          });
+        }
+      }
+    }
+  } catch (t2Err) {
+    lastError = t2Err;
+    console.warn('[API /download] Tier 2 (youtubei.js) failed:', t2Err.message);
+  }
+
+  // ----------------------------------------------------
+  // TIER 3: Hosted Cobalt API Endpoint (Env-Var Only)
   // ----------------------------------------------------
   const cobaltBase = process.env.COBALT_API_URL || null;
-
-  if (!cobaltBase) {
-    console.warn('[API /download] COBALT_API_URL is unset; Tier 2 (hosted Cobalt service) is disabled.');
-  } else {
+  if (cobaltBase) {
     try {
       const cobaltHeaders = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0'
       };
-
-      // Api-Key scheme per Cobalt specification
       if (process.env.COBALT_API_KEY) {
         cobaltHeaders['Authorization'] = `Api-Key ${process.env.COBALT_API_KEY}`;
       }
@@ -185,41 +191,42 @@ module.exports = async (req, res) => {
           audioFormat: 'mp3',
           videoQuality: quality === '1080' ? '1080' : quality === '720' ? '720' : 'auto'
         }),
-        signal: AbortSignal.timeout(10000)
+        signal: AbortSignal.timeout(8000)
       });
 
       if (cobaltRes.ok) {
         const cobaltData = await cobaltRes.json();
-        
-        // Handle all Cobalt response formats: url, tunnel, output, picker (local-processing)
         let mediaUrl = null;
-        if (cobaltData.url) {
-          mediaUrl = cobaltData.url;
-        } else if (cobaltData.tunnel) {
-          mediaUrl = Array.isArray(cobaltData.tunnel) ? cobaltData.tunnel[0] : cobaltData.tunnel;
-        } else if (cobaltData.output?.url) {
-          mediaUrl = cobaltData.output.url;
-        } else if (typeof cobaltData.output === 'string') {
-          mediaUrl = cobaltData.output;
-        } else if (cobaltData.picker && Array.isArray(cobaltData.picker) && cobaltData.picker[0]?.url) {
-          mediaUrl = cobaltData.picker[0].url;
-        }
+        if (cobaltData?.url) mediaUrl = cobaltData.url;
+        else if (cobaltData?.tunnel) mediaUrl = Array.isArray(cobaltData.tunnel) ? cobaltData.tunnel[0] : cobaltData.tunnel;
+        else if (cobaltData?.output?.url) mediaUrl = cobaltData.output.url;
+        else if (typeof cobaltData?.output === 'string') mediaUrl = cobaltData.output;
+        else if (cobaltData?.picker && Array.isArray(cobaltData.picker) && cobaltData.picker[0]?.url) mediaUrl = cobaltData.picker[0].url;
 
         if (mediaUrl) {
-          console.log('[API /download] Streaming via Cobalt direct media URL');
-          return streamRemoteUrl(mediaUrl, res, filename, mimeType);
+          console.log('[API /download] Tier 3 SUCCESS: Resolved Cobalt media URL');
+          return res.status(200).json({
+            success: true,
+            downloadUrl: mediaUrl,
+            filename,
+            mimeType,
+            format: {
+              quality: quality + (type === 'audio' ? 'kbps' : 'p')
+            },
+            provider: 'cobalt-api'
+          });
         }
       }
-    } catch (t2Err) {
-      lastError = t2Err;
-      console.warn('[API /download] Tier 2 (Cobalt) failed:', t2Err.message);
+    } catch (t3Err) {
+      lastError = t3Err;
+      console.warn('[API /download] Tier 3 (Cobalt) failed:', t3Err.message);
     }
   }
 
   // ----------------------------------------------------
-  // Error Response (Surface True Underlying Reason)
+  // Diagnostic Error Response
   // ----------------------------------------------------
-  const errMsg = lastError?.message || 'Download streaming failed';
+  const errMsg = lastError?.message || 'Download URL resolution failed';
   let statusCode = 503;
   let userFriendlyError = 'Extraction service temporarily unavailable. Please retry in a few moments.';
 
@@ -234,12 +241,11 @@ module.exports = async (req, res) => {
     userFriendlyError = 'This video is private, age-restricted, or region-restricted.';
   }
 
-  if (!res.headersSent) {
-    return res.status(statusCode).json({
-      error: userFriendlyError,
-      code: statusCode,
-      details: errMsg.substring(0, 180),
-      videoID
-    });
-  }
+  return res.status(statusCode).json({
+    success: false,
+    error: userFriendlyError,
+    code: statusCode,
+    details: errMsg.substring(0, 180),
+    videoID
+  });
 };

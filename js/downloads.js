@@ -1,8 +1,8 @@
 /* ============================================
    YouTube All-Rounder - Production Download System
-   Strict State Machine:
-   Processing... -> Successfully extracted -> Ready to download -> Downloading... -> Complete
-   OR Processing... -> Extraction failed (real reason)
+   Resolve-and-Direct-Download Architecture:
+   1. Backend resolves direct media stream URL (< 1 sec)
+   2. Browser downloads file directly without function timeouts
    ============================================ */
 
 /* ---------- THUMBNAIL DOWNLOADER ---------- */
@@ -190,7 +190,7 @@ async function probeAndExtractStream(videoID, type, quality, meta, box, retryCal
             </div>
             <div class="dl-progress-text">
                 <span>Processing...</span>
-                <span>Probing formats</span>
+                <span>Resolving stream URL</span>
             </div>
         </div>
     `;
@@ -297,7 +297,7 @@ async function probeAndExtractStream(videoID, type, quality, meta, box, retryCal
     }
 }
 
-// Production Download Execution
+// Production Download Execution (Resolve URL & Direct Client Download)
 async function executeProductionDownload(videoID, type, quality, filename, btnId, errorBoxId) {
     const btn = document.getElementById(btnId);
     const errBox = errorBoxId ? document.getElementById(errorBoxId) : null;
@@ -306,87 +306,96 @@ async function executeProductionDownload(videoID, type, quality, filename, btnId
 
     // UI State: Starting download...
     if (btn) {
-        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Starting download...`;
+        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Resolving download stream...`;
         btn.disabled = true;
         btn.classList.remove('dl-btn-retry');
     }
 
-    showToast('Starting download... Streaming file from server.', 'info');
+    showToast('Resolving media stream...', 'info');
 
     const downloadEndpoint = `/api/download?id=${encodeURIComponent(videoID)}&type=${encodeURIComponent(type)}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(filename)}`;
 
     try {
         const response = await fetch(downloadEndpoint, {
             method: 'GET',
-            headers: { 'Accept': '*/*' }
+            headers: { 'Accept': 'application/json' }
         });
 
-        if (!response.ok) {
-            let errorMsg = `Server error (${response.status})`;
-            try {
-                const errData = await response.json();
-                if (errData.error) errorMsg = errData.error;
-            } catch(e) {}
+        const data = await response.json();
+
+        if (!response.ok || !data.success || !data.downloadUrl) {
+            const errorMsg = data.error || `Failed to resolve stream (HTTP ${response.status})`;
             throw new Error(errorMsg);
         }
 
-        const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-            const text = await response.text();
-            try {
-                const json = JSON.parse(text);
-                throw new Error(json.error || 'Server returned invalid format.');
-            } catch(e) {
-                throw new Error('Server returned JSON error response.');
+        const directUrl = data.downloadUrl;
+        const targetFilename = data.filename || filename;
+
+        if (btn) {
+            btn.innerHTML = `<i class="fas fa-download fa-bounce"></i> Downloading file...`;
+        }
+
+        // Try direct in-browser Blob download stream
+        let downloadSuccessful = false;
+        try {
+            const mediaRes = await fetch(directUrl, { mode: 'cors' });
+            if (mediaRes.ok) {
+                const contentLengthHeader = mediaRes.headers.get('content-length');
+                const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
+                let receivedBytes = 0;
+
+                const reader = mediaRes.body.getReader();
+                const chunks = [];
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    receivedBytes += value.length;
+
+                    if (totalBytes > 0 && btn) {
+                        const pct = Math.min(99, Math.round((receivedBytes / totalBytes) * 100));
+                        btn.innerHTML = `<i class="fas fa-download fa-bounce"></i> Downloading (${pct}%)...`;
+                    }
+                }
+
+                const blob = new Blob(chunks, { type: data.mimeType || (type === 'audio' ? 'audio/mpeg' : 'video/mp4') });
+                if (blob.size > 0) {
+                    const blobUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = targetFilename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 20000);
+                    downloadSuccessful = true;
+                }
             }
+        } catch (corsErr) {
+            console.warn('[Direct Blob fetch fallback to native download anchor]:', corsErr);
         }
 
-        // UI State: Downloading (X%)...
-        const contentLengthHeader = response.headers.get('content-length');
-        const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
-        let receivedBytes = 0;
-
-        const reader = response.body.getReader();
-        const chunks = [];
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(value);
-            receivedBytes += value.length;
-
-            if (totalBytes > 0 && btn) {
-                const pct = Math.min(99, Math.round((receivedBytes / totalBytes) * 100));
-                btn.innerHTML = `<i class="fas fa-download fa-bounce"></i> Downloading (${pct}%)...`;
-            } else if (btn) {
-                const mb = (receivedBytes / (1024 * 1024)).toFixed(1);
-                btn.innerHTML = `<i class="fas fa-download fa-bounce"></i> Downloading (${mb}MB)...`;
-            }
+        // Native download trigger fallback if CORS prevents direct byte reading
+        if (!downloadSuccessful) {
+            const a = document.createElement('a');
+            a.href = directUrl;
+            a.download = targetFilename;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
         }
 
-        const blob = new Blob(chunks, { type: type === 'audio' ? 'audio/mpeg' : 'video/mp4' });
-        if (blob.size === 0) {
-            throw new Error('Received empty download stream.');
-        }
-
-        // UI State: Complete
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 20000);
-
-        showToast('Download complete! File saved to your device.', 'success');
+        showToast('Download started! File is saving to your device.', 'success');
 
         if (btn) {
             btn.innerHTML = `<i class="fas fa-check-circle"></i> Download Complete (Click to download again)`;
             btn.disabled = false;
         }
     } catch (err) {
-        console.error('[Download Stream Error]:', err);
+        console.error('[Download Error]:', err);
         showToast('Download failed: ' + err.message, 'error');
 
         if (btn) {
@@ -398,7 +407,7 @@ async function executeProductionDownload(videoID, type, quality, filename, btnId
         if (errBox) {
             errBox.style.display = 'flex';
             errBox.innerHTML = `
-                <div class="dl-error-title"><i class="fas fa-times"></i> Stream Error</div>
+                <div class="dl-error-title"><i class="fas fa-times"></i> Download Error</div>
                 <div>${escapeHtml(err.message)}</div>
             `;
         }
